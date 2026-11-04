@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from app import create_app, validate_shell
+from app import create_app, normalize_script, validate_shell
 
 
 def certificate_pair():
@@ -106,6 +106,7 @@ class AppTest(unittest.TestCase):
         self.assertEqual(validate_shell("cp {{CERT_PEM}} /tmp/cert.pem\nnginx -t"), "")
         self.assertIn("不支持的模板变量", validate_shell("cp {{OTHER}} /tmp/file"))
         self.assertTrue(validate_shell("if true; then\necho broken"))
+        self.assertEqual(normalize_script("cp a default.pem\r\ncp b default.key\r"), "cp a default.pem\ncp b default.key\n")
 
     def test_site_and_cron_validation(self):
         self.login()
@@ -123,15 +124,16 @@ class AppTest(unittest.TestCase):
                 "auth_type": "password",
                 "password": "secret",
                 "certificate_id": "1",
-                "script": "install -m 0644 {{CERT_PEM}} /tmp/default.pem",
+                "script": "install -m 0644 {{CERT_PEM}} /tmp/default.pem\r\ninstall -m 0600 {{CERT_KEY}} /tmp/default.key\r\n",
             },
         )
         self.assertEqual(response.status_code, 302)
         with self.app.app_context():
             from app import db
 
-            stored = db().execute("SELECT password_enc FROM sites WHERE id=1").fetchone()[0]
-            self.assertNotIn("secret", stored)
+            stored = db().execute("SELECT password_enc, script FROM sites WHERE id=1").fetchone()
+            self.assertNotIn("secret", stored["password_enc"])
+            self.assertNotIn("\r", stored["script"])
         token = self.csrf("/tasks/new")
         response = self.client.post(
             "/tasks/new",

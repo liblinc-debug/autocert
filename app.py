@@ -581,7 +581,7 @@ def save_site(existing=None) -> None:
         raise ValueError("密码登录方式需要填写 SSH 密码")
     if auth_type == "key" and not private_key and not (existing and existing["private_key"]):
         raise ValueError("私钥登录方式需要填写 PEM 私钥")
-    script = form["script"].strip()
+    script = normalize_script(form["script"]).strip()
     error = validate_shell(script)
     if error:
         raise ValueError(f"Shell 语法错误：{error}")
@@ -611,7 +611,7 @@ def save_site(existing=None) -> None:
 
 
 def validate_shell(script: str) -> str:
-    check_script = script
+    check_script = normalize_script(script)
     for placeholder, value in PLACEHOLDERS.items():
         check_script = check_script.replace(placeholder, shlex.quote(value))
     if re.search(r"{{[^}]+}}", check_script):
@@ -706,7 +706,7 @@ def deploy_site(app: Flask, site_id: int, task_id: int | None = None) -> tuple[b
             sftp.chmod(remote_key, 0o600)
             sftp.close()
 
-            script = site["script"].replace("{{CERT_PEM}}", shlex.quote(remote_cert)).replace("{{CERT_KEY}}", shlex.quote(remote_key))
+            script = normalize_script(site["script"]).replace("{{CERT_PEM}}", shlex.quote(remote_cert)).replace("{{CERT_KEY}}", shlex.quote(remote_key))
             stdin, stdout, stderr = client.exec_command("bash -se", timeout=120)
             stdin.write("set -e\n" + script + "\n")
             stdin.channel.shutdown_write()
@@ -761,6 +761,10 @@ def _load_private_key(value: str):
         except (paramiko.SSHException, ValueError):
             continue
     raise ValueError("无法解析 SSH 私钥（支持 RSA、Ed25519、ECDSA、DSS）")
+
+
+def normalize_script(script: str) -> str:
+    return script.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def encrypt_secret(value: str) -> str:
