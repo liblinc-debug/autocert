@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}证书部署中心{% endblock %}</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem('theme')||'light'</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('dashboard') }}"><span class="brand-mark">C</span><span>证书部署中心</span></a>
+    {% if session.user_id %}
+    <nav>
+      <a href="{{ url_for('dashboard') }}">概览</a>
+      <a href="{{ url_for('certificates') }}">证书</a>
+      <a href="{{ url_for('sites') }}">站点</a>
+      <a href="{{ url_for('tasks') }}">定时任务</a>
+    </nav>
+    <div class="user-actions">
+      <button class="icon-button" id="theme-toggle" type="button" title="切换主题">◐</button>
+      <a href="{{ url_for('change_password') }}">{{ session.username }}</a>
+      <form method="post" action="{{ url_for('logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="link-button" type="submit">退出</button>
+      </form>
+    </div>
+    {% endif %}
+  </header>
+  <main class="container {% block main_class %}{% endblock %}">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}<div class="alert {{ category }}">{{ message }}</div>{% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">DEPLOYMENT TARGET</p><h1>{{ '编辑站点' if site else '新建站点' }}</h1></div><a href="{{ url_for('sites') }}">← 返回列表</a></div>
+<form method="post" class="panel form-panel">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="form-section"><h2>基本信息</h2><div class="form-grid">
+    <label>站点名称<input name="name" value="{{ request.form.get('name', site.name if site else '') }}" placeholder="例如：深信服 coral-air-framework" required></label>
+    <label>业务域名<input name="domain" value="{{ request.form.get('domain', site.domain if site else '') }}" placeholder="api.airsensor.top"></label>
+    <label>关联证书<select name="certificate_id" id="certificate-select"><option value="">请选择证书</option>{% for cert in certificates %}<option value="{{ cert.id }}" data-cert="{{ cert.cert_filename }}" data-key="{{ cert.key_filename }}" {% if (request.form.get('certificate_id') or (site.certificate_id|string if site and site.certificate_id else '')) == cert.id|string %}selected{% endif %}>{{ cert.name }} · {{ cert.expires_at|date }}</option>{% endfor %}</select><small id="cert-path-help">部署时将上传为 {{ '{{CERT_PEM}}' }} 和 {{ '{{CERT_KEY}}' }}</small></label>
+  </div></div>
+  <div class="form-section"><h2>SSH 登录</h2><div class="form-grid three">
+    <label>主机/IP<input name="host" value="{{ request.form.get('host', site.host if site else '') }}" required></label>
+    <label>端口<input name="port" type="number" min="1" max="65535" value="{{ request.form.get('port', site.port if site else 22) }}" required></label>
+    <label>用户名<input name="username" value="{{ request.form.get('username', site.username if site else '') }}" required></label>
+    <label>认证方式<select name="auth_type" id="auth-type"><option value="password" {% if request.form.get('auth_type', site.auth_type if site else 'password') == 'password' %}selected{% endif %}>密码</option><option value="key" {% if request.form.get('auth_type', site.auth_type if site else '') == 'key' %}selected{% endif %}>私钥</option></select></label>
+    <label id="password-field">SSH 密码<input name="password" type="password" autocomplete="new-password" placeholder="{{ '留空则保持原密码' if site else '' }}"><small>使用 Fernet 加密后保存</small></label>
+    <label class="full" id="key-field">SSH 私钥<textarea name="private_key" rows="6" placeholder="{{ '留空则保持原私钥' if site else '-----BEGIN OPENSSH PRIVATE KEY-----' }}">{{ request.form.get('private_key', '') }}</textarea><small>使用 Fernet 加密后保存</small></label>
+  </div></div>
+  <div class="form-section"><div class="section-heading"><div><h2>Shell 部署脚本</h2><p class="muted">部署前证书和私钥会通过 SFTP 上传至目标机临时目录，脚本成功或失败后自动清理。</p></div><div class="insert-buttons"><button type="button" data-insert="{{ '{{CERT_PEM}}' }}">插入证书路径</button><button type="button" data-insert="{{ '{{CERT_KEY}}' }}">插入私钥路径</button></div></div>
+    <textarea class="code-editor" id="script" name="script" rows="14" spellcheck="false" required>{{ request.form.get('script', site.script if site else '# 将上传的证书复制到站点证书目录\ninstall -m 0644 {{CERT_PEM}} /etc/nginx/cert/default.pem\ninstall -m 0600 {{CERT_KEY}} /etc/nginx/cert/default.key\nnginx -t\nnginx -s reload') }}</textarea>
+    <small>保存时使用 <code>bash -n</code> 检查语法。脚本以 SSH 用户权限执行；如需 sudo，请在服务器预先配置免交互权限。</small>
+  </div>
+  <label>备注<textarea name="notes" rows="3">{{ request.form.get('notes', site.notes if site else '') }}</textarea></label>
+  <div class="form-actions"><a class="button" href="{{ url_for('sites') }}">取消</a><button class="button primary" type="submit">保存站点</button></div>
+</form>
+{% endblock %}
+{% block scripts %}<script>window.initSiteForm&&window.initSiteForm()</script>{% endblock %}

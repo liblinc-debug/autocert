@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}登录 · 证书部署中心{% endblock %}
+{% block main_class %}login-shell{% endblock %}
+{% block content %}
+<section class="login-card">
+  <div class="brand-mark large">C</div>
+  <p class="eyebrow">CERTIFICATE OPERATIONS</p>
+  <h1>证书部署中心</h1>
+  <p class="muted">统一管理证书、站点脚本与自动部署任务</p>
+  <form method="post" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>用户名<input name="username" autocomplete="username" required autofocus></label>
+    <label>密码<input type="password" name="password" autocomplete="current-password" required></label>
+    <button class="button primary wide" type="submit">安全登录</button>
+  </form>
+  <p class="login-hint">首次登录：libin / admin，请立即修改密码</p>
+</section>
+{% endblock %}

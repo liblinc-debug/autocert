@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">OVERVIEW</p><h1>运行概览</h1><p class="muted">证书状态与最近部署结果一目了然</p></div>
+  <a class="button primary" href="{{ url_for('certificate_new') }}">＋ 上传证书</a>
+</div>
+<section class="stats">
+  <article><span>证书</span><strong>{{ counts.certificates }}</strong><a href="{{ url_for('certificates') }}">查看全部 →</a></article>
+  <article><span>部署站点</span><strong>{{ counts.sites }}</strong><a href="{{ url_for('sites') }}">管理站点 →</a></article>
+  <article><span>运行中任务</span><strong>{{ counts.tasks }}</strong><a href="{{ url_for('tasks') }}">查看计划 →</a></article>
+</section>
+<div class="grid two">
+  <section class="panel">
+    <div class="panel-title"><h2>证书有效期</h2><a href="{{ url_for('certificates') }}">管理</a></div>
+    {% if certificates %}
+    <div class="list">
+      {% for cert in certificates %}{% set days=cert.expires_at|days_left %}
+      <div class="list-row">
+        <div><strong>{{ cert.name }}</strong><small>{{ cert.domains or '未记录域名' }}</small></div>
+        <span class="badge {% if days < 0 %}danger{% elif days <= 30 %}warning{% else %}success{% endif %}">{% if days < 0 %}已过期{% else %}{{ days }} 天{% endif %}</span>
+      </div>
+      {% endfor %}
+    </div>{% else %}<div class="empty">尚未上传证书</div>{% endif %}
+  </section>
+  <section class="panel">
+    <div class="panel-title"><h2>最近部署</h2></div>
+    {% if recent %}<div class="list">
+      {% for item in recent %}<div class="list-row">
+        <div><strong>{{ item.site_name or '已删除站点' }}</strong><small>{{ item.started_at|date }} · {{ item.certificate_name or '无证书' }}</small></div>
+        <span class="badge {{ 'success' if item.status == 'success' else 'danger' if item.status == 'failed' else 'neutral' }}">{{ {'success':'成功','failed':'失败','running':'执行中'}.get(item.status,item.status) }}</span>
+      </div>{% endfor %}
+    </div>{% else %}<div class="empty">暂无部署记录</div>{% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">DEPLOYMENT TARGETS</p><h1>站点与部署脚本</h1><p class="muted">维护 SSH 目标，并将证书安全复制后执行部署脚本</p></div><a class="button primary" href="{{ url_for('site_new') }}">＋ 新建站点</a></div>
+<section class="panel table-panel">
+{% if sites %}<div class="table-wrap"><table><thead><tr><th>站点 / 域名</th><th>SSH 目标</th><th>关联证书</th><th>认证</th><th class="actions">操作</th></tr></thead><tbody>
+{% for site in sites %}<tr><td><strong>{{ site.name }}</strong><small>{{ site.domain or '—' }}</small></td><td><code>{{ site.username }}@{{ site.host }}:{{ site.port }}</code></td><td>{{ site.certificate_name or '未关联' }}</td><td>{{ '密码' if site.auth_type == 'password' else '私钥' }}</td><td class="actions"><form method="post" action="{{ url_for('site_deploy', site_id=site.id) }}" onsubmit="return confirm('立即向该站点部署当前关联证书？')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button emphasis">立即部署</button></form><a href="{{ url_for('site_edit', site_id=site.id) }}">编辑</a><form method="post" action="{{ url_for('site_delete', site_id=site.id) }}" onsubmit="return confirm('删除站点及其定时任务？')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button danger-text">删除</button></form></td></tr>{% endfor %}
+</tbody></table></div>{% else %}<div class="empty">暂无部署站点。可分别为深信服宿主机、Docker 容器入口和阿里云服务器创建站点。</div>{% endif %}
+</section>
+{% endblock %}

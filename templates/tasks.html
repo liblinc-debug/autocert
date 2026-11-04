@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">SCHEDULES</p><h1>定时任务</h1><p class="muted">按 cron 计划自动执行站点部署脚本</p></div><a class="button primary" href="{{ url_for('task_new') }}">＋ 新建任务</a></div>
+<section class="panel table-panel">
+{% if tasks %}<div class="table-wrap"><table><thead><tr><th>任务</th><th>计划</th><th>站点</th><th>状态 / 上次运行</th><th class="actions">操作</th></tr></thead><tbody>
+{% for task in tasks %}<tr><td><strong>{{ task.name }}</strong><small>{{ task.notes or '—' }}</small></td><td><code>{{ task.cron }}</code></td><td>{{ task.site_name }}</td><td><span class="badge {{ 'neutral' if not task.enabled else 'success' if task.last_status == 'success' else 'danger' if task.last_status == 'failed' else 'warning' }}">{% if not task.enabled %}已停用{% elif task.last_status == 'success' %}上次成功{% elif task.last_status == 'failed' %}上次失败{% else %}等待执行{% endif %}</span><small>{{ task.last_run_at|date }}</small></td><td class="actions"><form method="post" action="{{ url_for('task_run', task_id=task.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button emphasis">运行一次</button></form><a href="{{ url_for('task_edit', task_id=task.id) }}">编辑</a><form method="post" action="{{ url_for('task_delete', task_id=task.id) }}" onsubmit="return confirm('删除这个定时任务？')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button danger-text">删除</button></form></td></tr>{% endfor %}
+</tbody></table></div>{% else %}<div class="empty">暂无定时任务。任务会按计划部署站点当前关联的证书。</div>{% endif %}
+</section>
+{% endblock %}

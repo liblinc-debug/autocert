@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">CERTIFICATE</p><h1>{{ '编辑证书信息' if certificate else '上传新证书' }}</h1></div><a href="{{ url_for('certificates') }}">← 返回列表</a></div>
+<form method="post" enctype="multipart/form-data" class="panel form-panel">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="form-grid">
+    <label>证书名称<input name="name" value="{{ certificate.name if certificate else request.form.get('name','') }}" placeholder="例如：2026 airsensor.top 通配证书" required></label>
+    {% if not certificate %}
+    <label>证书文件 (.pem/.crt/.cer)<input type="file" name="cert_file" accept=".pem,.crt,.cer" required><small>上传后自动识别颁发机构、域名和到期时间</small></label>
+    <label>私钥文件 (.key/.pem)<input type="file" name="key_file" accept=".key,.pem" required><small>系统会校验证书与私钥是否匹配</small></label>
+    {% else %}
+    <label>证书中心<input name="center" value="{{ certificate.center }}"></label>
+    <label class="full">适用域名<textarea name="domains" rows="2">{{ certificate.domains }}</textarea></label>
+    <label>到期时间<input type="date" name="expires_at" value="{{ certificate.expires_at[:10] }}" required></label>
+    <div class="file-summary"><small>证书文件</small><code>{{ certificate.cert_filename }}</code><small>私钥文件</small><code>{{ certificate.key_filename }}</code></div>
+    {% endif %}
+    <label class="full">备注<textarea name="notes" rows="4" placeholder="记录申请渠道、更新注意事项等">{{ certificate.notes if certificate else request.form.get('notes','') }}</textarea></label>
+  </div>
+  <div class="form-actions"><a class="button" href="{{ url_for('certificates') }}">取消</a><button class="button primary" type="submit">{{ '保存修改' if certificate else '上传并解析' }}</button></div>
+</form>
+{% endblock %}
