@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import paramiko
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -23,6 +24,7 @@ from flask import (
     abort,
     flash,
     g,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -45,6 +47,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.config.update(
         MAX_CONTENT_LENGTH=5 * 1024 * 1024,
         DATA_DIR=os.environ.get("APP_DATA_DIR", str(Path(__file__).parent / "data")),
+        TIMEZONE=os.environ.get("TZ", "Asia/Shanghai"),
         TESTING=False,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Strict",
@@ -78,7 +81,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         pass
 
     if not app.config["TESTING"] and os.environ.get("DISABLE_SCHEDULER") != "1":
-        scheduler = BackgroundScheduler(timezone=os.environ.get("TZ", "Asia/Shanghai"), daemon=True)
+        scheduler = BackgroundScheduler(timezone=app.config["TIMEZONE"], daemon=True)
         scheduler.start()
         app.extensions["scheduler"] = scheduler
         with app.app_context():
@@ -220,6 +223,18 @@ def register_template_helpers(app: Flask) -> None:
         try:
             return datetime.fromisoformat(str(value).replace("Z", "+00:00")).strftime("%Y-%m-%d")
         except ValueError:
+            return value
+
+    @app.template_filter("datetime")
+    def format_datetime(value):
+        if not value:
+            return "—"
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(ZoneInfo(app.config["TIMEZONE"])).strftime("%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError):
             return value
 
     @app.template_filter("days_left")
@@ -425,7 +440,26 @@ def register_routes(app: Flask) -> None:
         rows = db().execute(
             "SELECT t.*, s.name site_name FROM tasks t JOIN sites s ON s.id=t.site_id ORDER BY t.name"
         ).fetchall()
-        return render_template("tasks.html", tasks=rows)
+        task_rows = []
+        for row in rows:
+            item = dict(row)
+            item["next_run_at"] = cron_next_times(item["cron"], app.config["TIMEZONE"])[0].isoformat() if item["enabled"] else None
+            task_rows.append(item)
+        return render_template("tasks.html", tasks=task_rows, timezone_name=app.config["TIMEZONE"])
+
+    @app.get("/api/cron-next")
+    @login_required
+    def cron_next():
+        expression = request.args.get("cron", "").strip()
+        try:
+            next_time = cron_next_times(expression, app.config["TIMEZONE"])[0]
+        except (TypeError, ValueError):
+            return jsonify(valid=False, message=CRON_HELP), 400
+        return jsonify(
+            valid=True,
+            next_run=next_time.strftime("%Y-%m-%d %H:%M:%S"),
+            timezone=app.config["TIMEZONE"],
+        )
 
     @app.route("/tasks/new", methods=["GET", "POST"])
     @login_required
@@ -439,7 +473,7 @@ def register_routes(app: Flask) -> None:
                 sync_scheduler(app)
                 flash("定时任务已创建", "success")
                 return redirect(url_for("tasks"))
-        return render_template("task_form.html", task=None, sites=all_sites(), cron_help=CRON_HELP)
+        return render_template("task_form.html", task=None, sites=all_sites(), cron_help=CRON_HELP, timezone_name=app.config["TIMEZONE"])
 
     @app.route("/tasks/<int:task_id>/edit", methods=["GET", "POST"])
     @login_required
@@ -454,7 +488,7 @@ def register_routes(app: Flask) -> None:
                 sync_scheduler(app)
                 flash("定时任务已更新", "success")
                 return redirect(url_for("tasks"))
-        return render_template("task_form.html", task=task, sites=all_sites(), cron_help=CRON_HELP)
+        return render_template("task_form.html", task=task, sites=all_sites(), cron_help=CRON_HELP, timezone_name=app.config["TIMEZONE"])
 
     @app.post("/tasks/<int:task_id>/run")
     @login_required
@@ -641,6 +675,24 @@ def save_task(existing=None) -> None:
     else:
         db().execute("INSERT INTO tasks(name, cron, site_id, enabled, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)", values + (now_iso(),))
     db().commit()
+
+
+def cron_next_times(expression: str, timezone_name: str = "Asia/Shanghai", count: int = 1, now: datetime | None = None) -> list[datetime]:
+    tz = ZoneInfo(timezone_name)
+    current = now.astimezone(tz) if now else datetime.now(tz)
+    trigger = CronTrigger.from_crontab(expression, timezone=tz)
+    result = []
+    previous = None
+    for _ in range(count):
+        next_time = trigger.get_next_fire_time(previous, current)
+        if next_time is None:
+            break
+        result.append(next_time)
+        previous = next_time
+        current = next_time
+    if not result:
+        raise ValueError("cron 表达式没有可执行时间")
+    return result
 
 
 def sync_scheduler(app: Flask) -> None:

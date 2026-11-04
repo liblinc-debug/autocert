@@ -6,10 +6,11 @@
   <div class="form-grid">
     <label>任务名称<input name="name" value="{{ request.form.get('name', task.name if task else '') }}" placeholder="例如：每月检查并部署 Open 2.0" required></label>
     <label>站点<select name="site_id" required><option value="">请选择站点</option>{% for site in sites %}<option value="{{ site.id }}" {% if (request.form.get('site_id') or (task.site_id|string if task else '')) == site.id|string %}selected{% endif %}>{{ site.name }}</option>{% endfor %}</select></label>
-    <label>cron 表达式<input name="cron" value="{{ request.form.get('cron', task.cron if task else '0 2 * * *') }}" required><small>{{ cron_help }}（使用 Asia/Shanghai 时区）</small></label>
+    <label>cron 表达式<input id="cron-input" name="cron" value="{{ request.form.get('cron', task.cron if task else '0 2 * * *') }}" required><small>{{ cron_help }}（使用 {{ timezone_name }} 时区）</small><small id="cron-next" class="cron-next" aria-live="polite">正在计算下次执行时间…</small></label>
     <label class="checkbox"><input type="checkbox" name="enabled" {% if request.form.get('enabled') or (not request.form and (not task or task.enabled)) %}checked{% endif %}> 启用任务</label>
     <label class="full">备注<textarea name="notes" rows="4">{{ request.form.get('notes', task.notes if task else '') }}</textarea></label>
   </div>
   <div class="form-actions"><a class="button" href="{{ url_for('tasks') }}">取消</a><button class="button primary" type="submit">保存任务</button></div>
 </form>
 {% endblock %}
+{% block scripts %}<script>window.initCronPreview&&window.initCronPreview()</script>{% endblock %}

@@ -32,3 +32,27 @@ window.initSiteForm=()=>{
   };
   select?.addEventListener('change',updateCert); updateCert();
 };
+
+window.initCronPreview=()=>{
+  const input=document.getElementById('cron-input');
+  const output=document.getElementById('cron-next');
+  let timer;
+  const update=()=>{
+    clearTimeout(timer);
+    timer=setTimeout(async()=>{
+      const expression=input.value.trim();
+      if(!expression){output.textContent='请输入 cron 表达式';return;}
+      try{
+        const response=await fetch(`/api/cron-next?cron=${encodeURIComponent(expression)}`);
+        const data=await response.json();
+        if(!response.ok) throw new Error(data.message);
+        output.textContent=`下次执行：${data.next_run}（${data.timezone}）`;
+        output.classList.remove('invalid');
+      }catch(error){
+        output.textContent=error.message||'cron 表达式无效';
+        output.classList.add('invalid');
+      }
+    },250);
+  };
+  input?.addEventListener('input',update); update();
+};

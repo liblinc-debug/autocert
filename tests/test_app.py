@@ -4,6 +4,7 @@ import re
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 os.environ["DISABLE_SCHEDULER"] = "1"
 
@@ -12,7 +13,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from app import create_app, normalize_script, validate_shell
+from app import create_app, cron_next_times, normalize_script, validate_shell
 
 
 def certificate_pair():
@@ -107,6 +108,11 @@ class AppTest(unittest.TestCase):
         self.assertIn("不支持的模板变量", validate_shell("cp {{OTHER}} /tmp/file"))
         self.assertTrue(validate_shell("if true; then\necho broken"))
         self.assertEqual(normalize_script("cp a default.pem\r\ncp b default.key\r"), "cp a default.pem\ncp b default.key\n")
+
+    def test_cron_next_time_uses_shanghai_timezone(self):
+        now = datetime(2026, 11, 4, 17, 41, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+        next_time = cron_next_times("42 17 * * *", now=now)[0]
+        self.assertEqual(next_time.strftime("%Y-%m-%d %H:%M:%S %z"), "2026-11-04 17:42:00 +0800")
 
     def test_site_and_cron_validation(self):
         self.login()
