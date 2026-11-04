@@ -2,7 +2,7 @@
 {% block content %}
 <div class="page-heading">
   <div><p class="eyebrow">OVERVIEW</p><h1>运行概览</h1><p class="muted">证书状态与最近部署结果一目了然</p></div>
-  <a class="button primary" href="{{ url_for('certificate_new') }}">＋ 上传证书</a>
+  {% if g.user.role == 'admin' %}<a class="button primary" href="{{ url_for('certificate_new') }}">＋ 上传证书</a>{% endif %}
 </div>
 <section class="stats">
   <article><span>证书</span><strong>{{ counts.certificates }}</strong><a href="{{ url_for('certificates') }}">查看全部 →</a></article>

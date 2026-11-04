@@ -2,7 +2,7 @@
 {% block content %}
 <div class="page-heading"><div><p class="eyebrow">RELATIONSHIP</p><h1>{{ certificate.name }}</h1><p class="muted">当前使用此证书的站点</p></div><a href="{{ url_for('certificates') }}">← 返回证书</a></div>
 <section class="panel">
-{% if sites %}<div class="list">{% for site in sites %}<div class="list-row"><div><strong>{{ site.name }}</strong><small>{{ site.domain }} · {{ site.username }}@{{ site.host }}:{{ site.port }}</small></div><a href="{{ url_for('site_edit', site_id=site.id) }}">编辑站点 →</a></div>{% endfor %}</div>
+{% if sites %}<div class="list">{% for site in sites %}<div class="list-row"><div><strong>{{ site.name }}</strong><small>{{ site.domain }} · {{ site.username }}@{{ site.host }}:{{ site.port }}</small></div>{% if g.user.role == 'admin' %}<a href="{{ url_for('site_edit', site_id=site.id) }}">编辑站点 →</a>{% endif %}</div>{% endfor %}</div>
 {% else %}<div class="empty">还没有站点关联此证书</div>{% endif %}
 </section>
 {% endblock %}

@@ -52,9 +52,9 @@ class AppTest(unittest.TestCase):
         self.assertIsNotNone(match)
         return match.group(1).decode()
 
-    def login(self):
+    def login(self, username="libin", password="admin"):
         token = self.csrf()
-        response = self.client.post("/login", data={"csrf_token": token, "username": "libin", "password": "admin"})
+        response = self.client.post("/login", data={"csrf_token": token, "username": username, "password": password})
         self.assertEqual(response.status_code, 302)
 
     def upload_certificate(self):
@@ -76,6 +76,36 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.client.get("/").status_code, 302)
         self.login()
         self.assertIn("运行概览", self.client.get("/").get_data(as_text=True))
+
+    def test_admin_can_manage_users_and_regular_user_is_read_only(self):
+        self.login()
+        self.assertIn("用户管理", self.client.get("/users").get_data(as_text=True))
+        token = self.csrf("/users/new")
+        response = self.client.post(
+            "/users/new",
+            data={"csrf_token": token, "username": "reader", "password": "readerpass", "role": "user"},
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as current_session:
+            current_session.clear()
+        self.login("reader", "readerpass")
+        certificate_page = self.client.get("/certificates")
+        self.assertEqual(certificate_page.status_code, 200)
+        self.assertNotIn("上传证书", certificate_page.get_data(as_text=True))
+        self.assertEqual(self.client.get("/certificates/new").status_code, 403)
+        self.assertEqual(self.client.get("/sites/new").status_code, 403)
+        self.assertEqual(self.client.get("/tasks/new").status_code, 403)
+        self.assertEqual(self.client.get("/users").status_code, 403)
+
+    def test_last_admin_cannot_be_demoted(self):
+        self.login()
+        token = self.csrf("/users/1/edit")
+        response = self.client.post(
+            "/users/1/edit",
+            data={"csrf_token": token, "username": "libin", "password": "", "role": "user"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("不能降级系统中最后一个管理员", response.get_data(as_text=True))
 
     def test_certificate_is_parsed_and_saved(self):
         self.login()

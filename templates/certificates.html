@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">CERTIFICATES</p><h1>证书管理</h1><p class="muted">上传、识别并跟踪所有服务器证书</p></div><a class="button primary" href="{{ url_for('certificate_new') }}">＋ 上传证书</a></div>
+<div class="page-heading"><div><p class="eyebrow">CERTIFICATES</p><h1>证书管理</h1><p class="muted">上传、识别并跟踪所有服务器证书</p></div>{% if g.user.role == 'admin' %}<a class="button primary" href="{{ url_for('certificate_new') }}">＋ 上传证书</a>{% endif %}</div>
 <section class="panel table-panel">
 {% if certificates %}<div class="table-wrap"><table>
-  <thead><tr><th>名称 / 域名</th><th>证书中心</th><th>到期时间</th><th>关联站点</th><th class="actions">操作</th></tr></thead>
+  <thead><tr><th>名称 / 域名</th><th>证书中心</th><th>到期时间</th><th>关联站点</th>{% if g.user.role == 'admin' %}<th class="actions">操作</th>{% endif %}</tr></thead>
   <tbody>{% for cert in certificates %}{% set days=cert.expires_at|days_left %}<tr>
     <td><strong>{{ cert.name }}</strong><small>{{ cert.domains or '—' }}</small></td>
     <td class="truncate" title="{{ cert.center }}">{{ cert.center or '—' }}</td>
     <td><span class="badge {% if days < 0 %}danger{% elif days <= 30 %}warning{% else %}success{% endif %}">{{ cert.expires_at|date }} · {% if days < 0 %}已过期{% else %}{{ days }} 天{% endif %}</span></td>
     <td><a href="{{ url_for('certificate_sites', certificate_id=cert.id) }}">{{ cert.site_count }} 个站点</a></td>
-    <td class="actions"><a href="{{ url_for('certificate_edit', certificate_id=cert.id) }}">编辑</a><form method="post" action="{{ url_for('certificate_delete', certificate_id=cert.id) }}" onsubmit="return confirm('删除证书并解除站点关联？')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button danger-text">删除</button></form></td>
+    {% if g.user.role == 'admin' %}<td class="actions"><a href="{{ url_for('certificate_edit', certificate_id=cert.id) }}">编辑</a><form method="post" action="{{ url_for('certificate_delete', certificate_id=cert.id) }}" onsubmit="return confirm('删除证书并解除站点关联？')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button danger-text">删除</button></form></td>{% endif %}
   </tr>{% endfor %}</tbody>
 </table></div>{% else %}<div class="empty">还没有证书，先上传一份 PEM/CRT 证书和匹配私钥。</div>{% endif %}
 </section>

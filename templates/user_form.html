@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">ACCESS CONTROL</p><h1>{{ '编辑用户' if user else '新增用户' }}</h1></div><a href="{{ url_for('users') }}">← 返回列表</a></div>
+<form method="post" class="panel form-panel narrow">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="stack-form">
+    <label>用户名<input name="username" maxlength="64" value="{{ request.form.get('username', user.username if user else '') }}" required autofocus></label>
+    <label>{{ '新密码' if user else '密码' }}<input type="password" name="password" minlength="8" {% if not user %}required{% endif %} autocomplete="new-password"><small>{% if user %}留空则保持原密码；{% endif %}至少 8 个字符</small></label>
+    <label>角色<select name="role" required><option value="admin" {% if request.form.get('role', user.role if user else 'user') == 'admin' %}selected{% endif %}>管理员（全部权限）</option><option value="user" {% if request.form.get('role', user.role if user else 'user') == 'user' %}selected{% endif %}>普通用户（只读）</option></select></label>
+  </div>
+  <div class="form-actions"><a class="button" href="{{ url_for('users') }}">取消</a><button class="button primary" type="submit">{{ '保存修改' if user else '创建用户' }}</button></div>
+</form>
+{% endblock %}

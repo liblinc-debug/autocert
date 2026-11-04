@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">ACCESS CONTROL</p><h1>用户管理</h1><p class="muted">管理员拥有全部权限，普通用户仅可查看业务数据</p></div><a class="button primary" href="{{ url_for('user_new') }}">＋ 新增用户</a></div>
+<section class="panel table-panel">
+{% if users %}<div class="table-wrap"><table>
+  <thead><tr><th>用户名</th><th>角色</th><th class="actions">操作</th></tr></thead>
+  <tbody>{% for user in users %}<tr>
+    <td><strong>{{ user.username }}</strong>{% if user.id == g.user.id %}<small>当前登录用户</small>{% endif %}</td>
+    <td><span class="badge {{ 'success' if user.role == 'admin' else 'neutral' }}">{{ '管理员' if user.role == 'admin' else '普通用户' }}</span></td>
+    <td class="actions"><a href="{{ url_for('user_edit', user_id=user.id) }}">编辑</a>{% if user.id != g.user.id %}<form method="post" action="{{ url_for('user_delete', user_id=user.id) }}" onsubmit="return confirm('确定删除用户 {{ user.username }}？')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button danger-text">删除</button></form>{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>{% else %}<div class="empty">暂无用户</div>{% endif %}
+</section>
+{% endblock %}

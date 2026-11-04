@@ -125,7 +125,8 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user'
         );
         CREATE TABLE IF NOT EXISTS certificates (
             id INTEGER PRIMARY KEY,
@@ -179,11 +180,16 @@ def init_db() -> None:
         );
         """
     )
+    user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    if "role" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
     if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
         conn.execute(
-            "INSERT INTO users(username, password_hash) VALUES (?, ?)",
+            "INSERT INTO users(username, password_hash, role) VALUES (?, ?, 'admin')",
             ("libin", generate_password_hash("admin")),
         )
+    elif conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0] == 0:
+        conn.execute("UPDATE users SET role='admin' WHERE id=(SELECT id FROM users ORDER BY id LIMIT 1)")
     conn.commit()
 
 
@@ -194,11 +200,30 @@ def now_iso() -> str:
 def login_required(view):
     @wraps(view)
     def wrapped(**kwargs):
-        if not session.get("user_id"):
+        if not g.get("user"):
             return redirect(url_for("login", next=request.full_path))
         return view(**kwargs)
 
     return wrapped
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapped(**kwargs):
+        if not g.get("user"):
+            return redirect(url_for("login", next=request.full_path))
+        if g.user["role"] != "admin":
+            abort(403, "仅管理员可以执行此操作")
+        return view(**kwargs)
+
+    return wrapped
+
+
+def load_logged_in_user() -> None:
+    user_id = session.get("user_id")
+    g.user = db().execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone() if user_id else None
+    if user_id and g.user is None:
+        session.clear()
 
 
 def csrf_token() -> str:
@@ -250,6 +275,7 @@ def register_template_helpers(app: Flask) -> None:
 
 def register_routes(app: Flask) -> None:
     app.before_request(validate_csrf)
+    app.before_request(load_logged_in_user)
 
     @app.get("/icon.svg")
     def app_icon():
@@ -299,6 +325,60 @@ def register_routes(app: Flask) -> None:
                 return redirect(url_for("dashboard"))
         return render_template("change_password.html")
 
+    @app.get("/users")
+    @admin_required
+    def users():
+        rows = db().execute("SELECT id, username, role FROM users ORDER BY username").fetchall()
+        return render_template("users.html", users=rows)
+
+    @app.route("/users/new", methods=["GET", "POST"])
+    @admin_required
+    def user_new():
+        if request.method == "POST":
+            try:
+                save_user()
+            except ValueError as exc:
+                flash(str(exc), "error")
+            else:
+                flash("用户已创建", "success")
+                return redirect(url_for("users"))
+        return render_template("user_form.html", user=None)
+
+    @app.route("/users/<int:user_id>/edit", methods=["GET", "POST"])
+    @admin_required
+    def user_edit(user_id):
+        user = db().execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        if user is None:
+            abort(404)
+        if request.method == "POST":
+            try:
+                save_user(user)
+            except ValueError as exc:
+                flash(str(exc), "error")
+            else:
+                if user_id == session["user_id"]:
+                    session["username"] = request.form["username"].strip()
+                flash("用户信息已更新", "success")
+                destination = "dashboard" if user_id == session["user_id"] and request.form["role"] == "user" else "users"
+                return redirect(url_for(destination))
+        return render_template("user_form.html", user=user)
+
+    @app.post("/users/<int:user_id>/delete")
+    @admin_required
+    def user_delete(user_id):
+        user = db().execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        if user is None:
+            abort(404)
+        if user_id == session["user_id"]:
+            flash("不能删除当前登录用户", "error")
+        elif user["role"] == "admin" and admin_count() == 1:
+            flash("不能删除系统中最后一个管理员", "error")
+        else:
+            db().execute("DELETE FROM users WHERE id=?", (user_id,))
+            db().commit()
+            flash("用户已删除", "success")
+        return redirect(url_for("users"))
+
     @app.get("/")
     @login_required
     def dashboard():
@@ -327,7 +407,7 @@ def register_routes(app: Flask) -> None:
         return render_template("certificates.html", certificates=rows)
 
     @app.route("/certificates/new", methods=["GET", "POST"])
-    @login_required
+    @admin_required
     def certificate_new():
         if request.method == "POST":
             try:
@@ -340,7 +420,7 @@ def register_routes(app: Flask) -> None:
         return render_template("certificate_form.html", certificate=None)
 
     @app.route("/certificates/<int:certificate_id>/edit", methods=["GET", "POST"])
-    @login_required
+    @admin_required
     def certificate_edit(certificate_id):
         certificate = get_or_404("certificates", certificate_id)
         if request.method == "POST":
@@ -359,7 +439,7 @@ def register_routes(app: Flask) -> None:
         return render_template("certificate_form.html", certificate=certificate)
 
     @app.post("/certificates/<int:certificate_id>/delete")
-    @login_required
+    @admin_required
     def certificate_delete(certificate_id):
         certificate = get_or_404("certificates", certificate_id)
         db().execute("DELETE FROM certificates WHERE id=?", (certificate_id,))
@@ -388,7 +468,7 @@ def register_routes(app: Flask) -> None:
         return render_template("sites.html", sites=rows)
 
     @app.route("/sites/new", methods=["GET", "POST"])
-    @login_required
+    @admin_required
     def site_new():
         if request.method == "POST":
             try:
@@ -401,7 +481,7 @@ def register_routes(app: Flask) -> None:
         return render_template("site_form.html", site=None, certificates=all_certificates())
 
     @app.route("/sites/<int:site_id>/edit", methods=["GET", "POST"])
-    @login_required
+    @admin_required
     def site_edit(site_id):
         stored_site = get_or_404("sites", site_id)
         if request.method == "POST":
@@ -417,7 +497,7 @@ def register_routes(app: Flask) -> None:
         return render_template("site_form.html", site=site, certificates=all_certificates())
 
     @app.post("/sites/<int:site_id>/delete")
-    @login_required
+    @admin_required
     def site_delete(site_id):
         get_or_404("sites", site_id)
         db().execute("DELETE FROM sites WHERE id=?", (site_id,))
@@ -427,7 +507,7 @@ def register_routes(app: Flask) -> None:
         return redirect(url_for("sites"))
 
     @app.post("/sites/<int:site_id>/deploy")
-    @login_required
+    @admin_required
     def site_deploy(site_id):
         get_or_404("sites", site_id)
         ok, output = deploy_site(app, site_id)
@@ -462,7 +542,7 @@ def register_routes(app: Flask) -> None:
         )
 
     @app.route("/tasks/new", methods=["GET", "POST"])
-    @login_required
+    @admin_required
     def task_new():
         if request.method == "POST":
             try:
@@ -476,7 +556,7 @@ def register_routes(app: Flask) -> None:
         return render_template("task_form.html", task=None, sites=all_sites(), cron_help=CRON_HELP, timezone_name=app.config["TIMEZONE"])
 
     @app.route("/tasks/<int:task_id>/edit", methods=["GET", "POST"])
-    @login_required
+    @admin_required
     def task_edit(task_id):
         task = get_or_404("tasks", task_id)
         if request.method == "POST":
@@ -491,7 +571,7 @@ def register_routes(app: Flask) -> None:
         return render_template("task_form.html", task=task, sites=all_sites(), cron_help=CRON_HELP, timezone_name=app.config["TIMEZONE"])
 
     @app.post("/tasks/<int:task_id>/run")
-    @login_required
+    @admin_required
     def task_run(task_id):
         task = get_or_404("tasks", task_id)
         ok, output = deploy_site(app, task["site_id"], task_id)
@@ -499,7 +579,7 @@ def register_routes(app: Flask) -> None:
         return redirect(url_for("tasks"))
 
     @app.post("/tasks/<int:task_id>/delete")
-    @login_required
+    @admin_required
     def task_delete(task_id):
         get_or_404("tasks", task_id)
         db().execute("DELETE FROM tasks WHERE id=?", (task_id,))
@@ -516,6 +596,45 @@ def get_or_404(table: str, row_id: int):
     if row is None:
         abort(404)
     return row
+
+
+def admin_count() -> int:
+    return db().execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
+
+
+def save_user(existing=None) -> None:
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
+    role = request.form.get("role", "")
+    if not username or len(username) > 64:
+        raise ValueError("用户名不能为空且不能超过 64 个字符")
+    if role not in {"admin", "user"}:
+        raise ValueError("请选择有效的用户角色")
+    if not existing and len(password) < 8:
+        raise ValueError("新用户密码至少需要 8 个字符")
+    if password and len(password) < 8:
+        raise ValueError("密码至少需要 8 个字符")
+    if existing and existing["role"] == "admin" and role != "admin" and admin_count() == 1:
+        raise ValueError("不能降级系统中最后一个管理员")
+    conn = db()
+    try:
+        if existing:
+            if password:
+                conn.execute(
+                    "UPDATE users SET username=?, password_hash=?, role=? WHERE id=?",
+                    (username, generate_password_hash(password), role, existing["id"]),
+                )
+            else:
+                conn.execute("UPDATE users SET username=?, role=? WHERE id=?", (username, role, existing["id"]))
+        else:
+            conn.execute(
+                "INSERT INTO users(username, password_hash, role) VALUES (?, ?, ?)",
+                (username, generate_password_hash(password), role),
+            )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        raise ValueError("用户名已存在") from exc
 
 
 def all_certificates():

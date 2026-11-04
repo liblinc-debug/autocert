@@ -11,16 +11,18 @@
 <body>
   <header class="topbar">
     <a class="brand" href="{{ url_for('dashboard') }}"><img class="brand-mark" src="{{ url_for('app_icon') }}" alt=""><span>证书部署中心</span></a>
-    {% if session.user_id %}
+    {% if g.user %}
     <nav>
       <a href="{{ url_for('dashboard') }}">概览</a>
       <a href="{{ url_for('certificates') }}">证书</a>
       <a href="{{ url_for('sites') }}">站点</a>
       <a href="{{ url_for('tasks') }}">定时任务</a>
+      {% if g.user.role == 'admin' %}<a href="{{ url_for('users') }}">用户</a>{% endif %}
     </nav>
     <div class="user-actions">
       <button class="icon-button" id="theme-toggle" type="button" title="切换主题">◐</button>
-      <a href="{{ url_for('change_password') }}">{{ session.username }}</a>
+      {% if g.user.role == 'user' %}<span class="badge neutral">只读</span>{% endif %}
+      <a href="{{ url_for('change_password') }}">{{ g.user.username }}</a>
       <form method="post" action="{{ url_for('logout') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="link-button" type="submit">退出</button>
