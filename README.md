@@ -1,5 +1,7 @@
 # 数字证书自动部署中心
 
+GitHub：<https://github.com/liblinc-debug/autocert.git>
+
 一个面向内部运维的轻量 Web 工具，用于把证书上传、站点分发、Nginx 校验/重载和定时执行统一管理起来。它对应当前 `airsensor.top` 证书需要分别登录深信服宿主机、Docker 容器及阿里云服务器手工更新的场景。
 
 ## 功能
@@ -104,3 +106,5 @@ SSH_ALLOW_UNKNOWN_HOSTS=1 ./startup.sh
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
+
+Copyright © 2026 liblinc-debug.

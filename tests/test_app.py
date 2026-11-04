@@ -76,6 +76,10 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.client.get("/").status_code, 302)
         self.login()
         self.assertIn("运行概览", self.client.get("/").get_data(as_text=True))
+        help_page = self.client.get("/help")
+        self.assertEqual(help_page.status_code, 200)
+        self.assertIn("https://github.com/liblinc-debug/autocert.git", help_page.get_data(as_text=True))
+        self.assertIn("AutoCert v1.1", help_page.get_data(as_text=True))
 
     def test_admin_can_manage_users_and_regular_user_is_read_only(self):
         self.login()

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}帮助 · 证书部署中心{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">DOCUMENTATION</p><h1>帮助中心</h1><p class="muted">AutoCert v1.1 主要功能与操作说明</p></div><a class="button" href="https://github.com/liblinc-debug/autocert.git" target="_blank" rel="noopener noreferrer">查看 GitHub 仓库 ↗</a></div>
+
+<div class="help-grid">
+  <section class="panel help-card">
+    <span class="help-number">01</span><h2>证书管理</h2>
+    <p>集中保存服务器证书及私钥，自动读取颁发机构、适用域名和到期时间，并对一个月内到期或已经过期的证书进行提醒。</p>
+    <ol><li>进入“证书”，点击“上传证书”。</li><li>填写名称，选择证书文件和匹配的私钥文件。</li><li>上传后检查自动识别的信息，并按需要补充备注。</li><li>点击关联站点数量，可查看正在使用该证书的站点。</li></ol>
+  </section>
+
+  <section class="panel help-card">
+    <span class="help-number">02</span><h2>站点与部署脚本</h2>
+    <p>维护目标服务器 SSH 信息、关联证书和 Shell 脚本。部署时，系统先通过 SFTP 上传证书，再在目标服务器执行脚本。</p>
+    <ol><li>进入“站点”，新增目标服务器并选择密码或私钥认证。</li><li>选择需要部署的证书。</li><li>在脚本中使用 <code>{{ '{{CERT_PEM}}' }}</code> 和 <code>{{ '{{CERT_KEY}}' }}</code> 引用远端临时文件。</li><li>保存后可点击“立即部署”，系统会记录成功或失败结果。</li></ol>
+    <pre class="help-code">install -m 0644 {{ '{{CERT_PEM}}' }} /etc/nginx/cert/default.pem
+install -m 0600 {{ '{{CERT_KEY}}' }} /etc/nginx/cert/default.key
+nginx -t
+nginx -s reload</pre>
+  </section>
+
+  <section class="panel help-card">
+    <span class="help-number">03</span><h2>定时任务</h2>
+    <p>使用标准五段 cron 表达式，在上海时区按计划执行站点当前关联的部署脚本。</p>
+    <ol><li>进入“定时任务”，选择站点并填写 cron 表达式。</li><li>输入框下方会显示下一次具体执行时间。</li><li>保存并启用任务；列表会显示上次和下次运行时刻。</li><li>例如 <code>0 2 * * *</code> 表示每天凌晨 2 点执行。</li></ol>
+    <p class="help-note">程序必须持续运行，停机期间的定时任务不会执行。</p>
+  </section>
+
+  <section class="panel help-card">
+    <span class="help-number">04</span><h2>用户与权限</h2>
+    <p>管理员拥有全部权限，可维护用户、证书、站点和任务；普通用户只能查看业务数据。</p>
+    <ol><li>管理员进入“用户”可新增或编辑账号并选择角色。</li><li>普通用户看不到写操作按钮，直接访问写操作地址也会被拒绝。</li><li>所有用户都可点击右上角用户名修改自己的密码。</li><li>首次登录后应立即修改默认密码。</li></ol>
+  </section>
+
+  <section class="panel help-card full">
+    <span class="help-number">05</span><h2>使用与安全提示</h2>
+    <ul><li>建议只在管理网或 VPN 内开放本系统，并通过 HTTPS 访问。</li><li>目标服务器应使用独立、低权限的 SSH 账号，仅授予证书目录和服务重载所需权限。</li><li>脚本以 SSH 用户权限运行，不要使用需要交互输入的命令。</li><li>请完整备份 <code>data</code> 目录；其中包含数据库、证书、会话密钥和 SSH 凭据加密密钥。</li><li>部署前先在测试站点验证目录权限、容器名称和 Nginx 配置。</li></ul>
+  </section>
+</div>
+
+<section class="panel project-info">
+  <div><p class="eyebrow">PROJECT</p><h2>项目信息</h2></div>
+  <dl><div><dt>项目名称</dt><dd>AutoCert 数字证书自动部署中心</dd></div><div><dt>当前版本</dt><dd>v1.1</dd></div><div><dt>源代码</dt><dd><a href="https://github.com/liblinc-debug/autocert.git" target="_blank" rel="noopener noreferrer">github.com/liblinc-debug/autocert.git</a></dd></div><div><dt>开源许可</dt><dd>MIT License</dd></div><div><dt>版权</dt><dd>© 2026 liblinc-debug. All rights reserved.</dd></div></dl>
+</section>
+{% endblock %}

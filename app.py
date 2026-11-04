@@ -397,6 +397,11 @@ def register_routes(app: Flask) -> None:
         ).fetchall()
         return render_template("dashboard.html", counts=counts, certificates=certificates, recent=recent)
 
+    @app.get("/help")
+    @login_required
+    def help_page():
+        return render_template("help.html")
+
     @app.get("/certificates")
     @login_required
     def certificates():
