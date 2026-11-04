@@ -4,12 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}证书部署中心{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('app_icon') }}">
   <script>document.documentElement.dataset.theme=localStorage.getItem('theme')||'light'</script>
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="{{ url_for('dashboard') }}"><span class="brand-mark">C</span><span>证书部署中心</span></a>
+    <a class="brand" href="{{ url_for('dashboard') }}"><img class="brand-mark" src="{{ url_for('app_icon') }}" alt=""><span>证书部署中心</span></a>
     {% if session.user_id %}
     <nav>
       <a href="{{ url_for('dashboard') }}">概览</a>

@@ -26,6 +26,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_from_directory,
     session,
     url_for,
 )
@@ -234,6 +235,10 @@ def register_template_helpers(app: Flask) -> None:
 
 def register_routes(app: Flask) -> None:
     app.before_request(validate_csrf)
+
+    @app.get("/icon.svg")
+    def app_icon():
+        return send_from_directory(Path(app.root_path) / "crt", "icon.svg", mimetype="image/svg+xml")
 
     @app.get("/login")
     def login():
