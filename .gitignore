@@ -4,5 +4,4 @@ __pycache__/
 data/
 *.pyc
 .DS_Store
-crt/*
 数字证书部署步骤.md
