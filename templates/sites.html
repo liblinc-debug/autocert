@@ -1,9 +1,22 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">DEPLOYMENT TARGETS</p><h1>站点与部署脚本</h1><p class="muted">维护 SSH 目标，并将证书安全复制后执行部署脚本</p></div>{% if g.user.role == 'admin' %}<a class="button primary" href="{{ url_for('site_new') }}">＋ 新建站点</a>{% endif %}</div>
+<div class="page-heading"><div><p class="eyebrow">DEPLOYMENT TARGETS</p><h1>站点与部署脚本</h1><p class="muted">维护 SSH 目标，并将证书安全复制后执行部署脚本</p></div>{% if g.user.role == 'admin' %}<div class="heading-actions"><button class="button" id="bulk-certificate-button" type="button" disabled>设置证书</button><a class="button primary" href="{{ url_for('site_new') }}">＋ 新建站点</a></div>{% endif %}</div>
 <section class="panel table-panel">
-{% if sites %}<div class="table-wrap"><table><thead><tr><th>站点 / 域名</th><th>SSH 目标</th><th>关联证书</th><th>认证</th>{% if g.user.role == 'admin' %}<th class="actions">操作</th>{% endif %}</tr></thead><tbody>
-{% for site in sites %}<tr><td><strong>{{ site.name }}</strong><small>{{ site.domain or '—' }}</small></td><td><code>{{ site.username }}@{{ site.host }}:{{ site.port }}</code></td><td>{{ site.certificate_name or '未关联' }}</td><td>{{ '密码' if site.auth_type == 'password' else '私钥' }}</td>{% if g.user.role == 'admin' %}<td class="actions"><form method="post" action="{{ url_for('site_deploy', site_id=site.id) }}" onsubmit="return confirm('立即向该站点部署当前关联证书？')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button emphasis">立即部署</button></form><a href="{{ url_for('site_edit', site_id=site.id) }}">编辑</a><form method="post" action="{{ url_for('site_delete', site_id=site.id) }}" onsubmit="return confirm('删除站点及其定时任务？')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button danger-text">删除</button></form></td>{% endif %}</tr>{% endfor %}
+{% if sites %}<div class="table-wrap"><table><thead><tr>{% if g.user.role == 'admin' %}<th class="check-column"><input id="select-all-sites" type="checkbox" aria-label="选择全部站点"></th>{% endif %}<th>站点 / 域名</th><th>SSH 目标</th><th>关联证书</th><th>认证</th>{% if g.user.role == 'admin' %}<th class="actions">操作</th>{% endif %}</tr></thead><tbody>
+{% for site in sites %}<tr>{% if g.user.role == 'admin' %}<td class="check-column"><input class="site-checkbox" type="checkbox" value="{{ site.id }}" aria-label="选择站点 {{ site.name }}"></td>{% endif %}<td><strong>{{ site.name }}</strong><small>{{ site.domain or '—' }}</small></td><td><code>{{ site.username }}@{{ site.host }}:{{ site.port }}</code></td><td>{{ site.certificate_name or '未关联' }}</td><td>{{ '密码' if site.auth_type == 'password' else '私钥' }}</td>{% if g.user.role == 'admin' %}<td class="actions"><form method="post" action="{{ url_for('site_deploy', site_id=site.id) }}" onsubmit="return confirm('立即向该站点部署当前关联证书？')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button emphasis">立即部署</button></form><a href="{{ url_for('site_edit', site_id=site.id) }}">编辑</a><form method="post" action="{{ url_for('site_delete', site_id=site.id) }}" onsubmit="return confirm('删除站点及其定时任务？')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button danger-text">删除</button></form></td>{% endif %}</tr>{% endfor %}
 </tbody></table></div>{% else %}<div class="empty">暂无部署站点。可分别为深信服宿主机、Docker 容器入口和阿里云服务器创建站点。</div>{% endif %}
 </section>
+{% if g.user.role == 'admin' %}
+<dialog id="certificate-dialog" class="modal">
+  <form method="post" action="{{ url_for('sites_set_certificate') }}" id="bulk-certificate-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div id="selected-site-inputs"></div>
+    <div class="modal-heading"><div><p class="eyebrow">BULK UPDATE</p><h2>设置证书</h2></div><button type="button" class="modal-close" aria-label="关闭">×</button></div>
+    <p class="muted">将证书应用到已选择的 <strong id="selected-site-count">0</strong> 个站点。</p>
+    <label>选择未过期证书<select name="certificate_id" {% if certificates %}required{% else %}disabled{% endif %}><option value="">请选择证书</option>{% for certificate in certificates %}<option value="{{ certificate.id }}">{{ certificate.name }} · {{ certificate.domains or '未记录域名' }} · {{ certificate.expires_at|date }}</option>{% endfor %}</select>{% if not certificates %}<small class="danger-text">当前没有可用的未过期证书，请先上传新证书。</small>{% endif %}</label>
+    <div class="form-actions"><button class="button modal-cancel" type="button">取消</button><button class="button primary" type="submit" {% if not certificates %}disabled{% endif %}>确定</button></div>
+  </form>
+</dialog>
+{% endif %}
 {% endblock %}
+{% block scripts %}{% if g.user.role == 'admin' %}<script>window.initSitesPage&&window.initSitesPage()</script>{% endif %}{% endblock %}

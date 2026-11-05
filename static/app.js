@@ -88,3 +88,32 @@ window.initTaskForm=()=>{
   });
   refresh();
 };
+
+window.initSitesPage=()=>{
+  const checkboxes=[...document.querySelectorAll('.site-checkbox')];
+  const selectAll=document.getElementById('select-all-sites');
+  const openButton=document.getElementById('bulk-certificate-button');
+  const dialog=document.getElementById('certificate-dialog');
+  const inputs=document.getElementById('selected-site-inputs');
+  const count=document.getElementById('selected-site-count');
+  if(!openButton||!dialog)return;
+  const selected=()=>checkboxes.filter(checkbox=>checkbox.checked);
+  const refresh=()=>{
+    const selectedCount=selected().length;
+    openButton.disabled=selectedCount===0;
+    if(selectAll){selectAll.checked=selectedCount===checkboxes.length&&checkboxes.length>0;selectAll.indeterminate=selectedCount>0&&selectedCount<checkboxes.length;}
+  };
+  checkboxes.forEach(checkbox=>checkbox.addEventListener('change',refresh));
+  selectAll?.addEventListener('change',()=>{checkboxes.forEach(checkbox=>checkbox.checked=selectAll.checked);refresh();});
+  openButton.addEventListener('click',()=>{
+    const chosen=selected();
+    inputs.replaceChildren(...chosen.map(checkbox=>{const input=document.createElement('input');input.type='hidden';input.name='site_ids';input.value=checkbox.value;return input;}));
+    count.textContent=chosen.length;
+    dialog.showModal();
+  });
+  const close=()=>dialog.close();
+  dialog.querySelector('.modal-close')?.addEventListener('click',close);
+  dialog.querySelector('.modal-cancel')?.addEventListener('click',close);
+  dialog.addEventListener('click',event=>{if(event.target===dialog)close();});
+  refresh();
+};

@@ -574,7 +574,7 @@ def register_routes(app: Flask) -> None:
         rows = db().execute(
             "SELECT s.*, c.name certificate_name FROM sites s LEFT JOIN certificates c ON c.id=s.certificate_id ORDER BY s.name"
         ).fetchall()
-        return render_template("sites.html", sites=rows)
+        return render_template("sites.html", sites=rows, certificates=valid_certificates())
 
     @app.route("/sites/new", methods=["GET", "POST"])
     @admin_required
@@ -587,7 +587,7 @@ def register_routes(app: Flask) -> None:
             else:
                 flash("站点已创建", "success")
                 return redirect(url_for("sites"))
-        return render_template("site_form.html", site=None, certificates=all_certificates())
+        return render_template("site_form.html", site=None, certificates=valid_certificates())
 
     @app.route("/sites/<int:site_id>/edit", methods=["GET", "POST"])
     @admin_required
@@ -603,7 +603,34 @@ def register_routes(app: Flask) -> None:
                 return redirect(url_for("sites"))
         site = dict(stored_site)
         site["private_key"] = ""
-        return render_template("site_form.html", site=site, certificates=all_certificates())
+        return render_template("site_form.html", site=site, certificates=valid_certificates())
+
+    @app.post("/sites/set-certificate")
+    @admin_required
+    def sites_set_certificate():
+        try:
+            site_ids = list(dict.fromkeys(int(site_id) for site_id in request.form.getlist("site_ids")))
+            certificate_id = int(request.form.get("certificate_id", ""))
+        except ValueError:
+            flash("站点或证书选择无效", "error")
+            return redirect(url_for("sites"))
+        if not site_ids:
+            flash("请至少选择一个站点", "error")
+            return redirect(url_for("sites"))
+        certificate = db().execute("SELECT * FROM certificates WHERE id=?", (certificate_id,)).fetchone()
+        if not certificate or not certificate_is_valid(certificate):
+            flash("所选证书不存在或已经过期", "error")
+            return redirect(url_for("sites"))
+        placeholders = ",".join("?" for _ in site_ids)
+        existing_ids = {row[0] for row in db().execute(f"SELECT id FROM sites WHERE id IN ({placeholders})", site_ids)}
+        if existing_ids != set(site_ids):
+            flash("部分所选站点不存在，请刷新页面后重试", "error")
+            return redirect(url_for("sites"))
+        db().execute(f"UPDATE sites SET certificate_id=? WHERE id IN ({placeholders})", [certificate_id, *site_ids])
+        db().commit()
+        write_log("system", "success", g.user["username"], "批量设置站点证书", f"证书：{certificate['name']}；站点数量：{len(site_ids)}")
+        flash(f"已将证书“{certificate['name']}”应用到 {len(site_ids)} 个站点", "success")
+        return redirect(url_for("sites"))
 
     @app.post("/sites/<int:site_id>/delete")
     @admin_required
@@ -761,6 +788,20 @@ def all_certificates():
     return db().execute("SELECT * FROM certificates ORDER BY name").fetchall()
 
 
+def certificate_is_valid(certificate) -> bool:
+    try:
+        expires_at = datetime.fromisoformat(str(certificate["expires_at"]).replace("Z", "+00:00"))
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return expires_at > datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        return False
+
+
+def valid_certificates():
+    return [certificate for certificate in all_certificates() if certificate_is_valid(certificate)]
+
+
 def all_sites():
     return db().execute("SELECT * FROM sites ORDER BY name").fetchall()
 
@@ -877,8 +918,10 @@ def save_site(existing=None) -> None:
     if error:
         raise ValueError(f"Shell 语法错误：{error}")
     certificate_id = form.get("certificate_id") or None
-    if certificate_id and not db().execute("SELECT 1 FROM certificates WHERE id=?", (certificate_id,)).fetchone():
-        raise ValueError("关联证书不存在")
+    if certificate_id:
+        certificate = db().execute("SELECT * FROM certificates WHERE id=?", (certificate_id,)).fetchone()
+        if not certificate or not certificate_is_valid(certificate):
+            raise ValueError("关联证书不存在或已经过期")
     password_enc = existing["password_enc"] if existing else ""
     if password:
         password_enc = encrypt_secret(password)

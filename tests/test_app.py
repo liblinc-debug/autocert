@@ -98,7 +98,7 @@ class AppTest(unittest.TestCase):
         help_page = self.client.get("/help")
         self.assertEqual(help_page.status_code, 200)
         self.assertIn("https://github.com/liblinc-debug/autocert.git", help_page.get_data(as_text=True))
-        self.assertIn("AutoCert v1.4", help_page.get_data(as_text=True))
+        self.assertIn("AutoCert v1.5", help_page.get_data(as_text=True))
         self.assertIn("Linux systemd 安装", help_page.get_data(as_text=True))
 
     def test_log_categories_and_time_filter(self):
@@ -136,6 +136,11 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.client.get("/tasks/new").status_code, 403)
         self.assertEqual(self.client.get("/users").status_code, 403)
         self.assertEqual(self.client.get("/logs").status_code, 200)
+        token = self.csrf("/sites")
+        self.assertEqual(
+            self.client.post("/sites/set-certificate", data={"csrf_token": token, "site_ids": ["1"], "certificate_id": "1"}).status_code,
+            403,
+        )
 
     def test_last_admin_cannot_be_demoted(self):
         self.login()
@@ -228,6 +233,51 @@ class AppTest(unittest.TestCase):
             self.assertEqual(task["site_id"], 1)
             remaining = [row[0] for row in db().execute("SELECT site_id FROM task_sites WHERE task_id=1 ORDER BY position")]
             self.assertEqual(remaining, [1])
+
+    def test_bulk_certificate_update_only_allows_unexpired_certificates(self):
+        self.login()
+        self.upload_certificate()
+        self.create_site("Site A")
+        self.create_site("Site B")
+        with self.app.app_context():
+            from app import db
+
+            valid = db().execute("SELECT * FROM certificates WHERE id=1").fetchone()
+            db().execute(
+                """INSERT INTO certificates
+                   (name, center, domains, expires_at, notes, cert_filename, key_filename, cert_path, key_path, created_at)
+                   VALUES ('Expired certificate', ?, ?, '2020-01-01T00:00:00+00:00', '', ?, ?, ?, ?, ?)""",
+                (valid["center"], valid["domains"], valid["cert_filename"], valid["key_filename"], valid["cert_path"], valid["key_path"], valid["created_at"]),
+            )
+            db().execute("UPDATE sites SET certificate_id=NULL")
+            db().commit()
+        sites_page = self.client.get("/sites").get_data(as_text=True)
+        edit_page = self.client.get("/sites/1/edit").get_data(as_text=True)
+        self.assertIn("Example wildcard", sites_page)
+        self.assertNotIn("Expired certificate", sites_page)
+        self.assertNotIn("Expired certificate", edit_page)
+        token = self.csrf("/sites")
+        response = self.client.post(
+            "/sites/set-certificate",
+            data={"csrf_token": token, "site_ids": ["1", "2"], "certificate_id": "1"},
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            from app import db
+
+            assigned = [row[0] for row in db().execute("SELECT certificate_id FROM sites ORDER BY id")]
+            self.assertEqual(assigned, [1, 1])
+            db().execute("UPDATE sites SET certificate_id=NULL WHERE id=1")
+            db().commit()
+        token = self.csrf("/sites")
+        self.client.post(
+            "/sites/set-certificate",
+            data={"csrf_token": token, "site_ids": ["1"], "certificate_id": "2"},
+        )
+        with self.app.app_context():
+            from app import db
+
+            self.assertIsNone(db().execute("SELECT certificate_id FROM sites WHERE id=1").fetchone()[0])
 
     def test_site_and_cron_validation(self):
         self.login()
