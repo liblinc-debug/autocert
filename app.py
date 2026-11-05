@@ -178,6 +178,22 @@ def init_db() -> None:
             status TEXT NOT NULL,
             output TEXT NOT NULL DEFAULT ''
         );
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY,
+            category TEXT NOT NULL,
+            level TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT '',
+            message TEXT NOT NULL,
+            details TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            reference_type TEXT,
+            reference_id INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_time ON audit_logs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_logs_reference
+            ON audit_logs(reference_type, reference_id, category)
+            WHERE reference_type IS NOT NULL AND reference_id IS NOT NULL;
         """
     )
     user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
@@ -190,11 +206,41 @@ def init_db() -> None:
         )
     elif conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0] == 0:
         conn.execute("UPDATE users SET role='admin' WHERE id=(SELECT id FROM users ORDER BY id LIMIT 1)")
+    deployments = conn.execute(
+        """SELECT d.*, s.name site_name, t.name task_name FROM deployments d
+           LEFT JOIN sites s ON s.id=d.site_id LEFT JOIN tasks t ON t.id=d.task_id"""
+    ).fetchall()
+    for deployment in deployments:
+        category = "task" if deployment["task_id"] else "site"
+        target = deployment["task_name"] if deployment["task_id"] else deployment["site_name"]
+        conn.execute(
+            """INSERT OR IGNORE INTO audit_logs
+               (category, level, actor, message, details, created_at, reference_type, reference_id)
+               VALUES (?, ?, '历史记录', ?, ?, ?, 'deployment', ?)""",
+            (
+                category,
+                "success" if deployment["status"] == "success" else "error",
+                f"{'定时任务执行' if category == 'task' else '站点部署'}：{target or '已删除对象'}",
+                deployment["output"],
+                deployment["finished_at"] or deployment["started_at"],
+                deployment["id"],
+            ),
+        )
     conn.commit()
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def write_log(category: str, level: str, actor: str, message: str, details: str = "", reference_type: str | None = None, reference_id: int | None = None) -> None:
+    db().execute(
+        """INSERT OR IGNORE INTO audit_logs
+           (category, level, actor, message, details, created_at, reference_type, reference_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (category, level, actor[:64], message[:500], details[-10000:], now_iso(), reference_type, reference_id),
+    )
+    db().commit()
 
 
 def login_required(view):
@@ -289,10 +335,13 @@ def register_routes(app: Flask) -> None:
 
     @app.post("/login")
     def login_post():
-        user = db().execute("SELECT * FROM users WHERE username = ?", (request.form.get("username", ""),)).fetchone()
+        submitted_username = request.form.get("username", "").strip()
+        user = db().execute("SELECT * FROM users WHERE username = ?", (submitted_username,)).fetchone()
         if not user or not check_password_hash(user["password_hash"], request.form.get("password", "")):
+            write_log("login", "error", submitted_username or "未知用户", "登录失败", f"IP：{request.remote_addr or '未知'}")
             flash("用户名或密码错误", "error")
             return render_template("login.html"), 401
+        write_log("login", "success", user["username"], "登录成功", f"IP：{request.remote_addr or '未知'}")
         session.clear()
         session["user_id"] = user["id"]
         session["username"] = user["username"]
@@ -302,6 +351,7 @@ def register_routes(app: Flask) -> None:
     @app.post("/logout")
     @login_required
     def logout():
+        write_log("login", "info", g.user["username"], "退出登录", f"IP：{request.remote_addr or '未知'}")
         session.clear()
         return redirect(url_for("login"))
 
@@ -321,6 +371,7 @@ def register_routes(app: Flask) -> None:
             else:
                 db().execute("UPDATE users SET password_hash = ? WHERE id = ?", (generate_password_hash(new), user["id"]))
                 db().commit()
+                write_log("system", "success", user["username"], "修改个人密码")
                 flash("密码已修改", "success")
                 return redirect(url_for("dashboard"))
         return render_template("change_password.html")
@@ -340,6 +391,7 @@ def register_routes(app: Flask) -> None:
             except ValueError as exc:
                 flash(str(exc), "error")
             else:
+                write_log("system", "success", g.user["username"], "新增用户", f"用户：{request.form['username'].strip()}；角色：{request.form['role']}")
                 flash("用户已创建", "success")
                 return redirect(url_for("users"))
         return render_template("user_form.html", user=None)
@@ -356,8 +408,10 @@ def register_routes(app: Flask) -> None:
             except ValueError as exc:
                 flash(str(exc), "error")
             else:
+                actor = g.user["username"]
                 if user_id == session["user_id"]:
                     session["username"] = request.form["username"].strip()
+                write_log("system", "success", actor, "修改用户", f"用户：{request.form['username'].strip()}；角色：{request.form['role']}")
                 flash("用户信息已更新", "success")
                 destination = "dashboard" if user_id == session["user_id"] and request.form["role"] == "user" else "users"
                 return redirect(url_for(destination))
@@ -376,6 +430,7 @@ def register_routes(app: Flask) -> None:
         else:
             db().execute("DELETE FROM users WHERE id=?", (user_id,))
             db().commit()
+            write_log("system", "success", g.user["username"], "删除用户", f"用户：{user['username']}")
             flash("用户已删除", "success")
         return redirect(url_for("users"))
 
@@ -401,6 +456,45 @@ def register_routes(app: Flask) -> None:
     @login_required
     def help_page():
         return render_template("help.html")
+
+    @app.get("/logs")
+    @login_required
+    def logs():
+        log_type = request.args.get("type", "all")
+        if log_type not in {"all", "login", "site", "task"}:
+            log_type = "all"
+        start_value = request.args.get("start", "").strip()
+        end_value = request.args.get("end", "").strip()
+        conditions = []
+        parameters = []
+        if log_type != "all":
+            conditions.append("category=?")
+            parameters.append(log_type)
+        try:
+            start_time = parse_log_time(start_value, app.config["TIMEZONE"]) if start_value else None
+            end_time = parse_log_time(end_value, app.config["TIMEZONE"]) if end_value else None
+            if start_time and end_time and start_time > end_time:
+                raise ValueError("开始时间不能晚于结束时间")
+            if start_time:
+                conditions.append("created_at>=?")
+                parameters.append(start_time)
+            if end_time:
+                conditions.append("created_at<=?")
+                parameters.append(end_time)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            start_value = end_value = ""
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        # shortcut: 每次最多展示 500 条，日志量明显增长后增加分页。
+        rows = db().execute(f"SELECT * FROM audit_logs{where} ORDER BY created_at DESC, id DESC LIMIT 500", parameters).fetchall()
+        return render_template(
+            "logs.html",
+            logs=rows,
+            log_type=log_type,
+            start_value=start_value,
+            end_value=end_value,
+            category_names={"login": "人员登录", "site": "站点部署", "task": "定时任务", "system": "系统"},
+        )
 
     @app.get("/certificates")
     @login_required
@@ -515,7 +609,7 @@ def register_routes(app: Flask) -> None:
     @admin_required
     def site_deploy(site_id):
         get_or_404("sites", site_id)
-        ok, output = deploy_site(app, site_id)
+        ok, output = deploy_site(app, site_id, actor=g.user["username"])
         flash(("部署成功：" if ok else "部署失败：") + output[-500:], "success" if ok else "error")
         return redirect(url_for("sites"))
 
@@ -579,7 +673,7 @@ def register_routes(app: Flask) -> None:
     @admin_required
     def task_run(task_id):
         task = get_or_404("tasks", task_id)
-        ok, output = deploy_site(app, task["site_id"], task_id)
+        ok, output = deploy_site(app, task["site_id"], task_id, actor=g.user["username"])
         flash(("任务执行成功：" if ok else "任务执行失败：") + output[-500:], "success" if ok else "error")
         return redirect(url_for("tasks"))
 
@@ -819,6 +913,16 @@ def cron_next_times(expression: str, timezone_name: str = "Asia/Shanghai", count
     return result
 
 
+def parse_log_time(value: str, timezone_name: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("请输入有效的日志查询时间") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=ZoneInfo(timezone_name))
+    return parsed.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
 def sync_scheduler(app: Flask) -> None:
     scheduler = app.extensions.get("scheduler")
     if not scheduler:
@@ -841,17 +945,17 @@ def sync_scheduler(app: Flask) -> None:
 
 
 def scheduled_deploy(app: Flask, task_id: int, site_id: int) -> None:
-    deploy_site(app, site_id, task_id)
+    deploy_site(app, site_id, task_id, actor="系统调度器")
 
 
-def deploy_site(app: Flask, site_id: int, task_id: int | None = None) -> tuple[bool, str]:
+def deploy_site(app: Flask, site_id: int, task_id: int | None = None, actor: str = "系统") -> tuple[bool, str]:
     with app.app_context():
         site = db().execute("SELECT * FROM sites WHERE id=?", (site_id,)).fetchone()
         if not site:
             return False, "站点不存在"
         certificate = db().execute("SELECT * FROM certificates WHERE id=?", (site["certificate_id"],)).fetchone() if site["certificate_id"] else None
         if not certificate:
-            return _record_failure(site_id, None, task_id, "站点未关联证书")
+            return _record_failure(site_id, None, task_id, "站点未关联证书", actor)
         deployment_id = db().execute(
             "INSERT INTO deployments(site_id, certificate_id, task_id, started_at, status) VALUES (?, ?, ?, ?, 'running')",
             (site_id, certificate["id"], task_id, now_iso()),
@@ -911,17 +1015,38 @@ def deploy_site(app: Flask, site_id: int, task_id: int | None = None) -> tuple[b
                 (now_iso(), "success" if ok else "failed", message, task_id),
             )
         db().commit()
+        task = db().execute("SELECT name FROM tasks WHERE id=?", (task_id,)).fetchone() if task_id else None
+        write_log(
+            "task" if task_id else "site",
+            "success" if ok else "error",
+            actor,
+            f"{'定时任务执行' if task_id else '站点部署'}：{task['name'] if task else site['name']}",
+            message,
+            "deployment",
+            deployment_id,
+        )
         return ok, message
 
 
-def _record_failure(site_id: int, certificate_id: int | None, task_id: int | None, message: str):
-    db().execute(
+def _record_failure(site_id: int, certificate_id: int | None, task_id: int | None, message: str, actor: str):
+    deployment_id = db().execute(
         "INSERT INTO deployments(site_id, certificate_id, task_id, started_at, finished_at, status, output) VALUES (?, ?, ?, ?, ?, 'failed', ?)",
         (site_id, certificate_id, task_id, now_iso(), now_iso(), message),
-    )
+    ).lastrowid
     if task_id:
         db().execute("UPDATE tasks SET last_run_at=?, last_status='failed', last_output=? WHERE id=?", (now_iso(), message, task_id))
     db().commit()
+    site = db().execute("SELECT name FROM sites WHERE id=?", (site_id,)).fetchone()
+    task = db().execute("SELECT name FROM tasks WHERE id=?", (task_id,)).fetchone() if task_id else None
+    write_log(
+        "task" if task_id else "site",
+        "error",
+        actor,
+        f"{'定时任务执行' if task_id else '站点部署'}：{task['name'] if task else site['name'] if site else '未知对象'}",
+        message,
+        "deployment",
+        deployment_id,
+    )
     return False, message
 
 

@@ -18,6 +18,7 @@
       <a href="{{ url_for('sites') }}">站点</a>
       <a href="{{ url_for('tasks') }}">定时任务</a>
       {% if g.user.role == 'admin' %}<a href="{{ url_for('users') }}">用户</a>{% endif %}
+      <a href="{{ url_for('logs') }}">日志</a>
       <a href="{{ url_for('help_page') }}">帮助</a>
     </nav>
     <div class="user-actions">
@@ -37,7 +38,7 @@
     {% endwith %}
     {% block content %}{% endblock %}
   </main>
-  {% if g.user %}<footer class="footer"><span>© 2026 liblinc-debug · AutoCert v1.1 · MIT License</span><a href="https://github.com/liblinc-debug/autocert.git" target="_blank" rel="noopener noreferrer">GitHub</a></footer>{% endif %}
+  {% if g.user %}<footer class="footer"><span>© 2026 liblinc-debug · AutoCert v1.2 · MIT License</span><a href="https://github.com/liblinc-debug/autocert.git" target="_blank" rel="noopener noreferrer">GitHub</a></footer>{% endif %}
   <script src="{{ url_for('static', filename='app.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

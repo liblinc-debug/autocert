@@ -15,6 +15,7 @@ GitHub：<https://github.com/liblinc-debug/autocert.git>
 - 使用 `bash -n` 校验脚本语法，支持在光标处插入证书和私钥路径变量
 - 使用标准五段 cron 表达式定时部署，也可手动立即运行
 - 最近部署状态记录，浅色/深色主题切换
+- 人员登录、站点部署和定时任务执行日志，并支持分类及时间段查询
 
 ## 快速开始
 
@@ -93,7 +94,7 @@ SSH_ALLOW_UNKNOWN_HOSTS=1 ./startup.sh
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-测试覆盖登录、证书解析、证书/私钥匹配、Shell 语法和 cron 校验。
+测试覆盖登录与角色权限、日志分类及时间筛选、证书解析、证书/私钥匹配、Shell 语法和 cron 校验。
 
 ## 生产部署建议
 

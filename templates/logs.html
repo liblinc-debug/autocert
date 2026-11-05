@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}日志查询 · 证书部署中心{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">AUDIT LOGS</p><h1>日志查询</h1><p class="muted">查询登录、站点部署和定时任务执行记录</p></div><span class="badge neutral">最多显示最近 500 条</span></div>
+
+<form method="get" class="panel log-filters">
+  <label>日志分类<select name="type"><option value="login" {% if log_type == 'login' %}selected{% endif %}>人员登录日志</option><option value="site" {% if log_type == 'site' %}selected{% endif %}>站点部署日志</option><option value="task" {% if log_type == 'task' %}selected{% endif %}>定时任务执行日志</option><option value="all" {% if log_type == 'all' %}selected{% endif %}>系统日志（全部）</option></select></label>
+  <label>开始时间<input type="datetime-local" name="start" value="{{ start_value }}"></label>
+  <label>结束时间<input type="datetime-local" name="end" value="{{ end_value }}"></label>
+  <div class="log-filter-actions"><a class="button" href="{{ url_for('logs') }}">重置</a><button class="button primary" type="submit">查询</button></div>
+</form>
+
+<section class="panel table-panel log-results">
+{% if logs %}<div class="table-wrap"><table>
+  <thead><tr><th>时间</th><th>分类</th><th>操作人员</th><th>事件</th><th>结果</th><th>详情</th></tr></thead>
+  <tbody>{% for log in logs %}<tr>
+    <td class="log-time">{{ log.created_at|datetime }}</td>
+    <td><span class="badge neutral">{{ category_names.get(log.category, log.category) }}</span></td>
+    <td>{{ log.actor or '—' }}</td>
+    <td><strong>{{ log.message }}</strong></td>
+    <td><span class="badge {{ 'success' if log.level == 'success' else 'danger' if log.level == 'error' else 'neutral' }}">{{ '成功' if log.level == 'success' else '失败' if log.level == 'error' else '信息' }}</span></td>
+    <td>{% if log.details %}<details class="log-detail"><summary>查看</summary><pre>{{ log.details }}</pre></details>{% else %}—{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table></div>{% else %}<div class="empty">当前条件下没有日志记录</div>{% endif %}
+</section>
+{% endblock %}

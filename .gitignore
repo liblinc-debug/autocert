@@ -5,3 +5,5 @@ data/
 *.pyc
 .DS_Store
 数字证书部署步骤.md
+crt/**/*.key
+crt/**/*.pem

@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from app import create_app, cron_next_times, normalize_script, validate_shell
+from app import create_app, cron_next_times, normalize_script, validate_shell, write_log
 
 
 def certificate_pair():
@@ -79,7 +79,22 @@ class AppTest(unittest.TestCase):
         help_page = self.client.get("/help")
         self.assertEqual(help_page.status_code, 200)
         self.assertIn("https://github.com/liblinc-debug/autocert.git", help_page.get_data(as_text=True))
-        self.assertIn("AutoCert v1.1", help_page.get_data(as_text=True))
+        self.assertIn("AutoCert v1.2", help_page.get_data(as_text=True))
+
+    def test_log_categories_and_time_filter(self):
+        self.login()
+        with self.app.app_context():
+            write_log("site", "success", "libin", "site-marker", "site details")
+            write_log("task", "error", "系统调度器", "task-marker", "task details")
+        all_logs = self.client.get("/logs?type=all").get_data(as_text=True)
+        self.assertIn("site-marker", all_logs)
+        self.assertIn("task-marker", all_logs)
+        site_logs = self.client.get("/logs?type=site").get_data(as_text=True)
+        self.assertIn("site-marker", site_logs)
+        self.assertNotIn("task-marker", site_logs)
+        future_logs = self.client.get("/logs?type=all&start=2099-01-01T00:00").get_data(as_text=True)
+        self.assertNotIn("site-marker", future_logs)
+        self.assertIn("当前条件下没有日志记录", future_logs)
 
     def test_admin_can_manage_users_and_regular_user_is_read_only(self):
         self.login()
@@ -100,6 +115,7 @@ class AppTest(unittest.TestCase):
         self.assertEqual(self.client.get("/sites/new").status_code, 403)
         self.assertEqual(self.client.get("/tasks/new").status_code, 403)
         self.assertEqual(self.client.get("/users").status_code, 403)
+        self.assertEqual(self.client.get("/logs").status_code, 200)
 
     def test_last_admin_cannot_be_demoted(self):
         self.login()
