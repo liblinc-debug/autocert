@@ -5,12 +5,20 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="form-grid">
     <label>任务名称<input name="name" value="{{ request.form.get('name', task.name if task else '') }}" placeholder="例如：每月检查并部署 Open 2.0" required></label>
-    <label>站点<select name="site_id" required><option value="">请选择站点</option>{% for site in sites %}<option value="{{ site.id }}" {% if (request.form.get('site_id') or (task.site_id|string if task else '')) == site.id|string %}selected{% endif %}>{{ site.name }}</option>{% endfor %}</select></label>
     <label>cron 表达式<input id="cron-input" name="cron" value="{{ request.form.get('cron', task.cron if task else '0 2 * * *') }}" required><small>{{ cron_help }}（使用 {{ timezone_name }} 时区）</small><small id="cron-next" class="cron-next" aria-live="polite">正在计算下次执行时间…</small></label>
     <label class="checkbox"><input type="checkbox" name="enabled" {% if request.form.get('enabled') or (not request.form and (not task or task.enabled)) %}checked{% endif %}> 启用任务</label>
+    <div class="full transfer-field">
+      <div class="transfer-title"><strong>选择站点（部署脚本）</strong><small>右侧从上到下为执行顺序；某个站点失败后仍会继续执行下一个。</small></div>
+      <div class="transfer" id="site-transfer">
+        <div class="transfer-pane"><span>未选择</span><select id="transfer-available" multiple size="9" aria-label="未选择的站点">{% for site in available_sites %}<option value="{{ site.id }}">{{ site.name }}</option>{% endfor %}</select></div>
+        <div class="transfer-buttons"><button type="button" data-transfer="add" title="添加">→</button><button type="button" data-transfer="remove" title="移除">←</button></div>
+        <div class="transfer-pane"><span>已选择（执行顺序）</span><select id="transfer-selected" name="site_ids" multiple size="9" aria-label="已选择的站点">{% for site in selected_sites %}<option value="{{ site.id }}">{{ site.name }}</option>{% endfor %}</select><small id="transfer-order" class="transfer-order"></small></div>
+        <div class="transfer-buttons"><button type="button" data-transfer="up" title="上移">↑</button><button type="button" data-transfer="down" title="下移">↓</button></div>
+      </div>
+    </div>
     <label class="full">备注<textarea name="notes" rows="4">{{ request.form.get('notes', task.notes if task else '') }}</textarea></label>
   </div>
   <div class="form-actions"><a class="button" href="{{ url_for('tasks') }}">取消</a><button class="button primary" type="submit">保存任务</button></div>
 </form>
 {% endblock %}
-{% block scripts %}<script>window.initCronPreview&&window.initCronPreview()</script>{% endblock %}
+{% block scripts %}<script>window.initTaskForm&&window.initTaskForm()</script>{% endblock %}

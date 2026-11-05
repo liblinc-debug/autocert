@@ -56,3 +56,35 @@ window.initCronPreview=()=>{
   };
   input?.addEventListener('input',update); update();
 };
+
+window.initTaskForm=()=>{
+  window.initCronPreview?.();
+  const form=document.querySelector('form.form-panel');
+  const available=document.getElementById('transfer-available');
+  const selected=document.getElementById('transfer-selected');
+  const order=document.getElementById('transfer-order');
+  if(!form||!available||!selected)return;
+  const refresh=()=>{
+    const names=[...selected.options].map((option,index)=>`${index+1}. ${option.text}`);
+    selected.setCustomValidity('');
+    order.textContent=names.length?`执行顺序：${names.join(' → ')}`:'请至少选择一个站点';
+  };
+  const sortAvailable=()=>[...available.options].sort((a,b)=>a.text.localeCompare(b.text,'zh-CN')).forEach(option=>available.add(option));
+  const move=(from,to)=>[...from.selectedOptions].forEach(option=>to.add(option));
+  document.querySelector('[data-transfer="add"]')?.addEventListener('click',()=>{move(available,selected);refresh();});
+  document.querySelector('[data-transfer="remove"]')?.addEventListener('click',()=>{move(selected,available);sortAvailable();refresh();});
+  document.querySelector('[data-transfer="up"]')?.addEventListener('click',()=>{
+    [...selected.selectedOptions].forEach(option=>{const previous=option.previousElementSibling;if(previous&&!previous.selected)selected.insertBefore(option,previous);});refresh();
+  });
+  document.querySelector('[data-transfer="down"]')?.addEventListener('click',()=>{
+    [...selected.selectedOptions].reverse().forEach(option=>{const next=option.nextElementSibling;if(next&&!next.selected)selected.insertBefore(next,option);});refresh();
+  });
+  available.addEventListener('dblclick',()=>{move(available,selected);refresh();});
+  selected.addEventListener('dblclick',()=>{move(selected,available);sortAvailable();refresh();});
+  form.addEventListener('submit',event=>{
+    if(!selected.options.length){event.preventDefault();selected.setCustomValidity('请至少选择一个站点');selected.reportValidity();return;}
+    selected.setCustomValidity('');
+    [...selected.options].forEach(option=>option.selected=true);
+  });
+  refresh();
+};

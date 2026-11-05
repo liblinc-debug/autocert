@@ -168,6 +168,13 @@ def init_db() -> None:
             last_output TEXT,
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS task_sites (
+            task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            PRIMARY KEY (task_id, site_id),
+            UNIQUE (task_id, position)
+        );
         CREATE TABLE IF NOT EXISTS deployments (
             id INTEGER PRIMARY KEY,
             site_id INTEGER NOT NULL,
@@ -206,6 +213,9 @@ def init_db() -> None:
         )
     elif conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0] == 0:
         conn.execute("UPDATE users SET role='admin' WHERE id=(SELECT id FROM users ORDER BY id LIMIT 1)")
+    conn.execute(
+        "INSERT OR IGNORE INTO task_sites(task_id, site_id, position) SELECT id, site_id, 0 FROM tasks"
+    )
     deployments = conn.execute(
         """SELECT d.*, s.name site_name, t.name task_name FROM deployments d
            LEFT JOIN sites s ON s.id=d.site_id LEFT JOIN tasks t ON t.id=d.task_id"""
@@ -599,8 +609,17 @@ def register_routes(app: Flask) -> None:
     @admin_required
     def site_delete(site_id):
         get_or_404("sites", site_id)
-        db().execute("DELETE FROM sites WHERE id=?", (site_id,))
-        db().commit()
+        conn = db()
+        linked_tasks = conn.execute("SELECT task_id FROM task_sites WHERE site_id=?", (site_id,)).fetchall()
+        for linked in linked_tasks:
+            replacement = conn.execute(
+                "SELECT site_id FROM task_sites WHERE task_id=? AND site_id<>? ORDER BY position LIMIT 1",
+                (linked["task_id"], site_id),
+            ).fetchone()
+            if replacement:
+                conn.execute("UPDATE tasks SET site_id=? WHERE id=?", (replacement["site_id"], linked["task_id"]))
+        conn.execute("DELETE FROM sites WHERE id=?", (site_id,))
+        conn.commit()
         sync_scheduler(app)
         flash("站点及其定时任务已删除", "success")
         return redirect(url_for("sites"))
@@ -616,12 +635,11 @@ def register_routes(app: Flask) -> None:
     @app.get("/tasks")
     @login_required
     def tasks():
-        rows = db().execute(
-            "SELECT t.*, s.name site_name FROM tasks t JOIN sites s ON s.id=t.site_id ORDER BY t.name"
-        ).fetchall()
+        rows = db().execute("SELECT * FROM tasks ORDER BY name").fetchall()
         task_rows = []
         for row in rows:
             item = dict(row)
+            item["site_names"] = [site["name"] for site in get_task_sites(row["id"])]
             item["next_run_at"] = cron_next_times(item["cron"], app.config["TIMEZONE"])[0].isoformat() if item["enabled"] else None
             task_rows.append(item)
         return render_template("tasks.html", tasks=task_rows, timezone_name=app.config["TIMEZONE"])
@@ -652,7 +670,8 @@ def register_routes(app: Flask) -> None:
                 sync_scheduler(app)
                 flash("定时任务已创建", "success")
                 return redirect(url_for("tasks"))
-        return render_template("task_form.html", task=None, sites=all_sites(), cron_help=CRON_HELP, timezone_name=app.config["TIMEZONE"])
+        available_sites, selected_sites = task_site_choices(request.form.getlist("site_ids"))
+        return render_template("task_form.html", task=None, available_sites=available_sites, selected_sites=selected_sites, cron_help=CRON_HELP, timezone_name=app.config["TIMEZONE"])
 
     @app.route("/tasks/<int:task_id>/edit", methods=["GET", "POST"])
     @admin_required
@@ -667,14 +686,16 @@ def register_routes(app: Flask) -> None:
                 sync_scheduler(app)
                 flash("定时任务已更新", "success")
                 return redirect(url_for("tasks"))
-        return render_template("task_form.html", task=task, sites=all_sites(), cron_help=CRON_HELP, timezone_name=app.config["TIMEZONE"])
+        selected_ids = request.form.getlist("site_ids") if request.method == "POST" else [str(site["id"]) for site in get_task_sites(task_id)]
+        available_sites, selected_sites = task_site_choices(selected_ids)
+        return render_template("task_form.html", task=task, available_sites=available_sites, selected_sites=selected_sites, cron_help=CRON_HELP, timezone_name=app.config["TIMEZONE"])
 
     @app.post("/tasks/<int:task_id>/run")
     @admin_required
     def task_run(task_id):
-        task = get_or_404("tasks", task_id)
-        ok, output = deploy_site(app, task["site_id"], task_id, actor=g.user["username"])
-        flash(("任务执行成功：" if ok else "任务执行失败：") + output[-500:], "success" if ok else "error")
+        get_or_404("tasks", task_id)
+        ok, output = run_task(app, task_id, actor=g.user["username"])
+        flash(("任务执行成功：" if ok else "任务执行完成，但有站点失败：") + output[-500:], "success" if ok else "error")
         return redirect(url_for("tasks"))
 
     @app.post("/tasks/<int:task_id>/delete")
@@ -742,6 +763,24 @@ def all_certificates():
 
 def all_sites():
     return db().execute("SELECT * FROM sites ORDER BY name").fetchall()
+
+
+def get_task_sites(task_id: int):
+    return db().execute(
+        """SELECT s.* FROM task_sites ts JOIN sites s ON s.id=ts.site_id
+           WHERE ts.task_id=? ORDER BY ts.position""",
+        (task_id,),
+    ).fetchall()
+
+
+def task_site_choices(selected_ids) -> tuple[list, list]:
+    sites = all_sites()
+    by_id = {str(site["id"]): site for site in sites}
+    ordered_ids = list(dict.fromkeys(str(site_id) for site_id in selected_ids))
+    selected = [by_id[site_id] for site_id in ordered_ids if site_id in by_id]
+    selected_set = {site["id"] for site in selected}
+    available = [site for site in sites if site["id"] not in selected_set]
+    return available, selected
 
 
 def _valid_date(value: str) -> bool:
@@ -878,21 +917,37 @@ def validate_shell(script: str) -> str:
 def save_task(existing=None) -> None:
     name = request.form.get("name", "").strip()
     cron = request.form.get("cron", "").strip()
-    site_id = request.form.get("site_id", "")
-    if not name or not cron or not site_id:
-        raise ValueError("任务名称、cron 表达式和站点不能为空")
+    raw_site_ids = request.form.getlist("site_ids")
+    try:
+        site_ids = list(dict.fromkeys(int(site_id) for site_id in raw_site_ids if site_id))
+    except ValueError as exc:
+        raise ValueError("站点选择无效") from exc
+    if not name or not cron or not site_ids:
+        raise ValueError("任务名称、cron 表达式和至少一个站点不能为空")
     try:
         CronTrigger.from_crontab(cron)
     except ValueError as exc:
         raise ValueError(CRON_HELP) from exc
-    if not db().execute("SELECT 1 FROM sites WHERE id=?", (site_id,)).fetchone():
+    placeholders = ",".join("?" for _ in site_ids)
+    existing_site_ids = {row[0] for row in db().execute(f"SELECT id FROM sites WHERE id IN ({placeholders})", site_ids)}
+    if existing_site_ids != set(site_ids):
         raise ValueError("所选站点不存在")
-    values = (name, cron, site_id, 1 if request.form.get("enabled") else 0, request.form.get("notes", "").strip())
+    values = (name, cron, site_ids[0], 1 if request.form.get("enabled") else 0, request.form.get("notes", "").strip())
+    conn = db()
     if existing:
-        db().execute("UPDATE tasks SET name=?, cron=?, site_id=?, enabled=?, notes=? WHERE id=?", values + (existing["id"],))
+        conn.execute("UPDATE tasks SET name=?, cron=?, site_id=?, enabled=?, notes=? WHERE id=?", values + (existing["id"],))
+        task_id = existing["id"]
     else:
-        db().execute("INSERT INTO tasks(name, cron, site_id, enabled, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)", values + (now_iso(),))
-    db().commit()
+        task_id = conn.execute(
+            "INSERT INTO tasks(name, cron, site_id, enabled, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            values + (now_iso(),),
+        ).lastrowid
+    conn.execute("DELETE FROM task_sites WHERE task_id=?", (task_id,))
+    conn.executemany(
+        "INSERT INTO task_sites(task_id, site_id, position) VALUES (?, ?, ?)",
+        [(task_id, site_id, position) for position, site_id in enumerate(site_ids)],
+    )
+    conn.commit()
 
 
 def cron_next_times(expression: str, timezone_name: str = "Asia/Shanghai", count: int = 1, now: datetime | None = None) -> list[datetime]:
@@ -936,7 +991,7 @@ def sync_scheduler(app: Flask) -> None:
             scheduler.add_job(
                 scheduled_deploy,
                 CronTrigger.from_crontab(task["cron"], timezone=scheduler.timezone),
-                args=[app, task["id"], task["site_id"]],
+                args=[app, task["id"]],
                 id=f"task-{task['id']}",
                 replace_existing=True,
                 max_instances=1,
@@ -944,18 +999,61 @@ def sync_scheduler(app: Flask) -> None:
             )
 
 
-def scheduled_deploy(app: Flask, task_id: int, site_id: int) -> None:
-    deploy_site(app, site_id, task_id, actor="系统调度器")
+def scheduled_deploy(app: Flask, task_id: int) -> None:
+    run_task(app, task_id, actor="系统调度器")
 
 
-def deploy_site(app: Flask, site_id: int, task_id: int | None = None, actor: str = "系统") -> tuple[bool, str]:
+def run_task(app: Flask, task_id: int, actor: str) -> tuple[bool, str]:
+    with app.app_context():
+        task = db().execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not task:
+            return False, "任务不存在"
+        sites = get_task_sites(task_id)
+        if not sites:
+            message = "任务没有关联任何站点"
+            db().execute(
+                "UPDATE tasks SET last_run_at=?, last_status='failed', last_output=? WHERE id=?",
+                (now_iso(), message, task_id),
+            )
+            db().commit()
+            write_log("task", "error", actor, f"定时任务执行：{task['name']}", message)
+            return False, message
+
+        results = []
+        all_ok = True
+        for site in sites:
+            try:
+                ok, message = deploy_site(app, site["id"], task_id, actor=actor, update_task=False)
+            except Exception as exc:
+                ok, message = False, f"未预期错误：{exc}"
+                write_log("task", "error", actor, f"定时任务执行：{task['name']} → {site['name']}", message)
+            all_ok = all_ok and ok
+            results.append(f"[{'成功' if ok else '失败'}] {site['name']}：{message}")
+
+        summary = "\n".join(results)[-10000:]
+        db().execute(
+            "UPDATE tasks SET last_run_at=?, last_status=?, last_output=? WHERE id=?",
+            (now_iso(), "success" if all_ok else "failed", summary, task_id),
+        )
+        db().commit()
+        write_log(
+            "task",
+            "success" if all_ok else "error",
+            actor,
+            f"定时任务汇总：{task['name']}",
+            summary,
+        )
+        return all_ok, summary
+
+
+def deploy_site(app: Flask, site_id: int, task_id: int | None = None, actor: str = "系统", update_task: bool = True) -> tuple[bool, str]:
     with app.app_context():
         site = db().execute("SELECT * FROM sites WHERE id=?", (site_id,)).fetchone()
         if not site:
             return False, "站点不存在"
         certificate = db().execute("SELECT * FROM certificates WHERE id=?", (site["certificate_id"],)).fetchone() if site["certificate_id"] else None
         if not certificate:
-            return _record_failure(site_id, None, task_id, "站点未关联证书", actor)
+            return _record_failure(site_id, None, task_id, "站点未关联证书", actor, update_task)
         deployment_id = db().execute(
             "INSERT INTO deployments(site_id, certificate_id, task_id, started_at, status) VALUES (?, ?, ?, ?, 'running')",
             (site_id, certificate["id"], task_id, now_iso()),
@@ -1009,18 +1107,19 @@ def deploy_site(app: Flask, site_id: int, task_id: int | None = None, actor: str
             "UPDATE deployments SET finished_at=?, status=?, output=? WHERE id=?",
             (now_iso(), "success" if ok else "failed", message, deployment_id),
         )
-        if task_id:
+        if task_id and update_task:
             db().execute(
                 "UPDATE tasks SET last_run_at=?, last_status=?, last_output=? WHERE id=?",
                 (now_iso(), "success" if ok else "failed", message, task_id),
             )
         db().commit()
         task = db().execute("SELECT name FROM tasks WHERE id=?", (task_id,)).fetchone() if task_id else None
+        target_name = f"{task['name']} → {site['name']}" if task else site["name"]
         write_log(
             "task" if task_id else "site",
             "success" if ok else "error",
             actor,
-            f"{'定时任务执行' if task_id else '站点部署'}：{task['name'] if task else site['name']}",
+            f"{'定时任务执行' if task_id else '站点部署'}：{target_name}",
             message,
             "deployment",
             deployment_id,
@@ -1028,21 +1127,22 @@ def deploy_site(app: Flask, site_id: int, task_id: int | None = None, actor: str
         return ok, message
 
 
-def _record_failure(site_id: int, certificate_id: int | None, task_id: int | None, message: str, actor: str):
+def _record_failure(site_id: int, certificate_id: int | None, task_id: int | None, message: str, actor: str, update_task: bool = True):
     deployment_id = db().execute(
         "INSERT INTO deployments(site_id, certificate_id, task_id, started_at, finished_at, status, output) VALUES (?, ?, ?, ?, ?, 'failed', ?)",
         (site_id, certificate_id, task_id, now_iso(), now_iso(), message),
     ).lastrowid
-    if task_id:
+    if task_id and update_task:
         db().execute("UPDATE tasks SET last_run_at=?, last_status='failed', last_output=? WHERE id=?", (now_iso(), message, task_id))
     db().commit()
     site = db().execute("SELECT name FROM sites WHERE id=?", (site_id,)).fetchone()
     task = db().execute("SELECT name FROM tasks WHERE id=?", (task_id,)).fetchone() if task_id else None
+    target_name = f"{task['name']} → {site['name'] if site else '未知站点'}" if task else site["name"] if site else "未知对象"
     write_log(
         "task" if task_id else "site",
         "error",
         actor,
-        f"{'定时任务执行' if task_id else '站点部署'}：{task['name'] if task else site['name'] if site else '未知对象'}",
+        f"{'定时任务执行' if task_id else '站点部署'}：{target_name}",
         message,
         "deployment",
         deployment_id,

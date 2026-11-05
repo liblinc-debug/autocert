@@ -4,6 +4,7 @@ import re
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 os.environ["DISABLE_SCHEDULER"] = "1"
@@ -13,7 +14,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from app import create_app, cron_next_times, normalize_script, validate_shell, write_log
+from app import create_app, cron_next_times, normalize_script, run_task, validate_shell, write_log
 
 
 def certificate_pair():
@@ -72,6 +73,24 @@ class AppTest(unittest.TestCase):
             content_type="multipart/form-data",
         )
 
+    def create_site(self, name, host="127.0.0.1", script="install -m 0644 {{CERT_PEM}} /tmp/default.pem"):
+        token = self.csrf("/sites/new")
+        return self.client.post(
+            "/sites/new",
+            data={
+                "csrf_token": token,
+                "name": name,
+                "domain": "",
+                "host": host,
+                "port": "22",
+                "username": "deploy",
+                "auth_type": "password",
+                "password": "secret",
+                "certificate_id": "1",
+                "script": script,
+            },
+        )
+
     def test_login_required_and_default_login(self):
         self.assertEqual(self.client.get("/").status_code, 302)
         self.login()
@@ -79,7 +98,7 @@ class AppTest(unittest.TestCase):
         help_page = self.client.get("/help")
         self.assertEqual(help_page.status_code, 200)
         self.assertIn("https://github.com/liblinc-debug/autocert.git", help_page.get_data(as_text=True))
-        self.assertIn("AutoCert v1.3", help_page.get_data(as_text=True))
+        self.assertIn("AutoCert v1.4", help_page.get_data(as_text=True))
         self.assertIn("Linux systemd 安装", help_page.get_data(as_text=True))
 
     def test_log_categories_and_time_filter(self):
@@ -165,24 +184,57 @@ class AppTest(unittest.TestCase):
         next_time = cron_next_times("42 17 * * *", now=now)[0]
         self.assertEqual(next_time.strftime("%Y-%m-%d %H:%M:%S %z"), "2026-11-04 17:42:00 +0800")
 
+    def test_task_keeps_site_order_and_continues_after_failure(self):
+        self.login()
+        self.upload_certificate()
+        self.assertEqual(self.create_site("Site A").status_code, 302)
+        self.assertEqual(self.create_site("Site B").status_code, 302)
+        token = self.csrf("/tasks/new")
+        response = self.client.post(
+            "/tasks/new",
+            data={
+                "csrf_token": token,
+                "name": "ordered task",
+                "cron": "0 2 * * *",
+                "site_ids": ["2", "1"],
+                "enabled": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.app.app_context():
+            from app import db
+
+            ordered_ids = [row[0] for row in db().execute("SELECT site_id FROM task_sites WHERE task_id=1 ORDER BY position")]
+            self.assertEqual(ordered_ids, [2, 1])
+        with patch("app.deploy_site", side_effect=[(False, "first failed"), (True, "second ok")]) as mocked:
+            ok, summary = run_task(self.app, 1, "libin")
+        self.assertFalse(ok)
+        self.assertEqual([call.args[1] for call in mocked.call_args_list], [2, 1])
+        self.assertIn("[失败] Site B", summary)
+        self.assertIn("[成功] Site A", summary)
+        with self.app.app_context():
+            from app import db
+
+            task = db().execute("SELECT last_status FROM tasks WHERE id=1").fetchone()
+            self.assertEqual(task["last_status"], "failed")
+            log = db().execute("SELECT details FROM audit_logs WHERE message='定时任务汇总：ordered task'").fetchone()
+            self.assertIn("first failed", log["details"])
+        token = self.csrf("/sites")
+        self.assertEqual(self.client.post("/sites/2/delete", data={"csrf_token": token}).status_code, 302)
+        with self.app.app_context():
+            from app import db
+
+            task = db().execute("SELECT site_id FROM tasks WHERE id=1").fetchone()
+            self.assertEqual(task["site_id"], 1)
+            remaining = [row[0] for row in db().execute("SELECT site_id FROM task_sites WHERE task_id=1 ORDER BY position")]
+            self.assertEqual(remaining, [1])
+
     def test_site_and_cron_validation(self):
         self.login()
         self.upload_certificate()
-        token = self.csrf("/sites/new")
-        response = self.client.post(
-            "/sites/new",
-            data={
-                "csrf_token": token,
-                "name": "Open API",
-                "domain": "openapi.example.com",
-                "host": "127.0.0.1",
-                "port": "22",
-                "username": "deploy",
-                "auth_type": "password",
-                "password": "secret",
-                "certificate_id": "1",
-                "script": "install -m 0644 {{CERT_PEM}} /tmp/default.pem\r\ninstall -m 0600 {{CERT_KEY}} /tmp/default.key\r\n",
-            },
+        response = self.create_site(
+            "Open API",
+            script="install -m 0644 {{CERT_PEM}} /tmp/default.pem\r\ninstall -m 0600 {{CERT_KEY}} /tmp/default.key\r\n",
         )
         self.assertEqual(response.status_code, 302)
         with self.app.app_context():
@@ -194,7 +246,7 @@ class AppTest(unittest.TestCase):
         token = self.csrf("/tasks/new")
         response = self.client.post(
             "/tasks/new",
-            data={"csrf_token": token, "name": "bad cron", "site_id": "1", "cron": "not-a-cron", "enabled": "on"},
+            data={"csrf_token": token, "name": "bad cron", "site_ids": ["1"], "cron": "not-a-cron", "enabled": "on"},
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn("cron 表达式必须为 5 段", response.get_data(as_text=True))
