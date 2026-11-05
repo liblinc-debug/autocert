@@ -34,6 +34,43 @@ chmod +x startup.sh
 HOST=127.0.0.1 PORT=8080 ./startup.sh
 ```
 
+## Linux systemd 一键安装
+
+在使用 systemd 的 Linux 服务器上执行：
+
+```bash
+chmod +x install.sh
+sudo ./install.sh
+```
+
+默认安装到 `/opt/autocert`，数据保存在 `/var/lib/autocert`，服务监听 `0.0.0.0:5000`。自定义端口示例：
+
+```bash
+sudo AUTOCERT_PORT=5005 ./install.sh
+```
+
+常用服务命令：
+
+```bash
+sudo systemctl status autocert
+sudo systemctl restart autocert
+sudo journalctl -u autocert -f
+```
+
+首次安装时，如果当前项目存在 `data` 目录，脚本会使用 SQLite 在线备份接口迁移数据库，并复制证书和密钥。重复执行脚本用于升级时，会自动沿用现有 systemd 的运行用户、程序目录、数据目录、监听地址和端口，绝不会用项目中的 `data` 覆盖服务数据；升级前还会停止服务并把数据备份到 `/var/backups/autocert`。应用启动时会自动执行新增数据库结构的迁移。
+
+升级仍使用同一条命令：
+
+```bash
+sudo ./install.sh
+```
+
+备份文件不会自动删除，请按服务器容量制定保留策略。服务默认拒绝未知 SSH 主机；可把目标主机密钥加入 `/var/lib/autocert/.ssh/known_hosts`，或在受控内网明确接受风险时创建 `/etc/default/autocert`：
+
+```bash
+SSH_ALLOW_UNKNOWN_HOSTS=1
+```
+
 应用数据保存在 `./data`：
 
 - `cert_deployer.db`：业务数据

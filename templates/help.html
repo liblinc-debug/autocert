@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}帮助 · 证书部署中心{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">DOCUMENTATION</p><h1>帮助中心</h1><p class="muted">AutoCert v1.2 主要功能与操作说明</p></div><a class="button" href="https://github.com/liblinc-debug/autocert.git" target="_blank" rel="noopener noreferrer">查看 GitHub 仓库 ↗</a></div>
+<div class="page-heading"><div><p class="eyebrow">DOCUMENTATION</p><h1>帮助中心</h1><p class="muted">AutoCert v1.3 主要功能与操作说明</p></div><a class="button" href="https://github.com/liblinc-debug/autocert.git" target="_blank" rel="noopener noreferrer">查看 GitHub 仓库 ↗</a></div>
 
 <div class="help-grid">
   <section class="panel help-card">
@@ -39,14 +39,20 @@ nginx -s reload</pre>
     <ol><li>管理员进入“用户”可新增或编辑账号并选择角色。</li><li>普通用户看不到写操作按钮，直接访问写操作地址也会被拒绝。</li><li>所有用户都可点击右上角用户名修改自己的密码。</li><li>首次登录后应立即修改默认密码。</li></ol>
   </section>
 
+  <section class="panel help-card">
+    <span class="help-number">06</span><h2>Linux systemd 安装</h2>
+    <p>在使用 systemd 的 Linux 服务器上，可以一键安装、启用并启动 AutoCert 服务。</p>
+    <ol><li>进入程序目录并执行 <code>chmod +x install.sh</code>。</li><li>执行 <code>sudo ./install.sh</code>。</li><li>使用 <code>systemctl status autocert</code> 查看状态。</li><li>使用 <code>journalctl -u autocert -f</code> 查看运行日志。</li></ol>
+  </section>
+
   <section class="panel help-card full">
-    <span class="help-number">06</span><h2>使用与安全提示</h2>
-    <ul><li>建议只在管理网或 VPN 内开放本系统，并通过 HTTPS 访问。</li><li>目标服务器应使用独立、低权限的 SSH 账号，仅授予证书目录和服务重载所需权限。</li><li>脚本以 SSH 用户权限运行，不要使用需要交互输入的命令。</li><li>请完整备份 <code>data</code> 目录；其中包含数据库、证书、会话密钥和 SSH 凭据加密密钥。</li><li>部署前先在测试站点验证目录权限、容器名称和 Nginx 配置。</li></ul>
+    <span class="help-number">07</span><h2>使用与安全提示</h2>
+    <ul><li>建议只在管理网或 VPN 内开放本系统，并通过 HTTPS 访问。</li><li>目标服务器应使用独立、低权限的 SSH 账号，仅授予证书目录和服务重载所需权限。</li><li>脚本以 SSH 用户权限运行，不要使用需要交互输入的命令。</li><li>请完整备份数据目录；其中包含数据库、证书、会话密钥和 SSH 凭据加密密钥。</li><li>部署前先在测试站点验证目录权限、容器名称和 Nginx 配置。</li></ul>
   </section>
 </div>
 
 <section class="panel project-info">
   <div><p class="eyebrow">PROJECT</p><h2>项目信息</h2></div>
-  <dl><div><dt>项目名称</dt><dd>AutoCert 数字证书自动部署中心</dd></div><div><dt>当前版本</dt><dd>v1.2</dd></div><div><dt>源代码</dt><dd><a href="https://github.com/liblinc-debug/autocert.git" target="_blank" rel="noopener noreferrer">github.com/liblinc-debug/autocert.git</a></dd></div><div><dt>开源许可</dt><dd>MIT License</dd></div><div><dt>版权</dt><dd>© 2026 liblinc-debug. All rights reserved.</dd></div></dl>
+  <dl><div><dt>项目名称</dt><dd>AutoCert 数字证书自动部署中心</dd></div><div><dt>当前版本</dt><dd>v1.3</dd></div><div><dt>源代码</dt><dd><a href="https://github.com/liblinc-debug/autocert.git" target="_blank" rel="noopener noreferrer">github.com/liblinc-debug/autocert.git</a></dd></div><div><dt>开源许可</dt><dd>MIT License</dd></div><div><dt>版权</dt><dd>© 2026 liblinc-debug. All rights reserved.</dd></div></dl>
 </section>
 {% endblock %}

@@ -79,7 +79,8 @@ class AppTest(unittest.TestCase):
         help_page = self.client.get("/help")
         self.assertEqual(help_page.status_code, 200)
         self.assertIn("https://github.com/liblinc-debug/autocert.git", help_page.get_data(as_text=True))
-        self.assertIn("AutoCert v1.2", help_page.get_data(as_text=True))
+        self.assertIn("AutoCert v1.3", help_page.get_data(as_text=True))
+        self.assertIn("Linux systemd 安装", help_page.get_data(as_text=True))
 
     def test_log_categories_and_time_filter(self):
         self.login()
