@@ -1104,11 +1104,9 @@ def deploy_site(app: Flask, site_id: int, task_id: int | None = None, actor: str
         db().commit()
 
         client = paramiko.SSHClient()
-        client.load_system_host_keys()
-        if os.environ.get("SSH_ALLOW_UNKNOWN_HOSTS") == "1":
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         remote_dir = f"/tmp/cert-deployer-{uuid.uuid4().hex}"
         try:
+            configure_ssh_client(client)
             connect_args = dict(hostname=site["host"], port=site["port"], username=site["username"], timeout=15, banner_timeout=15, auth_timeout=15)
             if site["auth_type"] == "password":
                 try:
@@ -1125,17 +1123,15 @@ def deploy_site(app: Flask, site_id: int, task_id: int | None = None, actor: str
             sftp.put(certificate["cert_path"], remote_cert)
             sftp.put(certificate["key_path"], remote_key)
             sftp.chmod(remote_key, 0o600)
+            script = normalize_script(site["script"]).replace("{{CERT_PEM}}", shlex.quote(remote_cert)).replace("{{CERT_KEY}}", shlex.quote(remote_key))
+            remote_script = f"{remote_dir}/deploy.sh"
+            with sftp.file(remote_script, "w") as script_file:
+                script_file.write(("set -e\n" + script + "\n").encode())
+            sftp.chmod(remote_script, 0o700)
             sftp.close()
 
-            script = normalize_script(site["script"]).replace("{{CERT_PEM}}", shlex.quote(remote_cert)).replace("{{CERT_KEY}}", shlex.quote(remote_key))
-            stdin, stdout, stderr = client.exec_command("bash -se", timeout=120)
-            stdin.write("set -e\n" + script + "\n")
-            stdin.channel.shutdown_write()
-            exit_code = stdout.channel.recv_exit_status()
-            output = (stdout.read().decode(errors="replace") + stderr.read().decode(errors="replace")).strip()
-            if exit_code != 0:
-                raise RuntimeError(f"脚本退出码 {exit_code}\n{output}")
-            ok, message = True, output or "执行完成"
+            message = execute_remote_script(client, remote_script)
+            ok = True
         except Exception as exc:
             ok, message = False, str(exc)
         finally:
@@ -1205,6 +1201,46 @@ def _load_private_key(value: str):
         except (paramiko.SSHException, ValueError):
             continue
     raise ValueError("无法解析 SSH 私钥（支持 RSA、Ed25519、ECDSA、DSS）")
+
+
+def configure_ssh_client(client: paramiko.SSHClient) -> Path:
+    known_hosts = Path(os.environ.get("SSH_KNOWN_HOSTS", "~/.ssh/known_hosts")).expanduser()
+    parent_was_missing = not known_hosts.parent.exists()
+    known_hosts.parent.mkdir(parents=True, exist_ok=True)
+    if parent_was_missing:
+        try:
+            known_hosts.parent.chmod(0o700)
+        except OSError:
+            pass
+    known_hosts.touch(exist_ok=True)
+    try:
+        known_hosts.chmod(0o600)
+    except OSError:
+        pass
+    client.load_system_host_keys()
+    client.load_host_keys(str(known_hosts))
+    if "SSH_STRICT_HOST_KEYS" in os.environ:
+        strict = os.environ["SSH_STRICT_HOST_KEYS"] == "1"
+    elif "SSH_ALLOW_UNKNOWN_HOSTS" in os.environ:
+        strict = os.environ["SSH_ALLOW_UNKNOWN_HOSTS"] != "1"
+    else:
+        strict = False
+    client.set_missing_host_key_policy(paramiko.RejectPolicy() if strict else paramiko.AutoAddPolicy())
+    return known_hosts
+
+
+def execute_remote_script(client: paramiko.SSHClient, remote_script: str) -> str:
+    stdin, stdout, stderr = client.exec_command(
+        f"bash -e -- {shlex.quote(remote_script)}",
+        timeout=120,
+        get_pty=True,
+    )
+    stdin.channel.shutdown_write()
+    output = (stdout.read().decode(errors="replace") + stderr.read().decode(errors="replace")).strip()
+    exit_code = stdout.channel.recv_exit_status()
+    if exit_code != 0:
+        raise RuntimeError(f"脚本退出码 {exit_code}\n{output}")
+    return output or "执行完成"
 
 
 def normalize_script(script: str) -> str:

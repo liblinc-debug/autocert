@@ -4,7 +4,7 @@ import re
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 os.environ["DISABLE_SCHEDULER"] = "1"
@@ -14,7 +14,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from app import create_app, cron_next_times, normalize_script, run_task, validate_shell, write_log
+import paramiko
+
+from app import configure_ssh_client, create_app, cron_next_times, execute_remote_script, normalize_script, run_task, validate_shell, write_log
 
 
 def certificate_pair():
@@ -98,8 +100,51 @@ class AppTest(unittest.TestCase):
         help_page = self.client.get("/help")
         self.assertEqual(help_page.status_code, 200)
         self.assertIn("https://github.com/liblinc-debug/autocert.git", help_page.get_data(as_text=True))
-        self.assertIn("AutoCert v1.5", help_page.get_data(as_text=True))
+        self.assertIn("AutoCert v1.6", help_page.get_data(as_text=True))
         self.assertIn("Linux systemd 安装", help_page.get_data(as_text=True))
+
+    def test_ssh_unknown_host_is_persisted_by_default(self):
+        known_hosts = os.path.join(self.tmp.name, ".ssh", "known_hosts")
+        client = paramiko.SSHClient()
+        with patch.dict(os.environ, {"SSH_KNOWN_HOSTS": known_hosts}, clear=False):
+            os.environ.pop("SSH_STRICT_HOST_KEYS", None)
+            os.environ.pop("SSH_ALLOW_UNKNOWN_HOSTS", None)
+            result = configure_ssh_client(client)
+            client._transport = MagicMock()
+            client._policy.missing_host_key(client, "192.0.2.1", paramiko.RSAKey.generate(1024))
+        self.assertEqual(str(result), known_hosts)
+        self.assertTrue(os.path.isfile(known_hosts))
+        verifier = paramiko.SSHClient()
+        verifier.load_host_keys(known_hosts)
+        self.assertIn("192.0.2.1", verifier.get_host_keys())
+
+    def test_ssh_strict_mode_rejects_unknown_hosts(self):
+        known_hosts = os.path.join(self.tmp.name, ".ssh", "strict_known_hosts")
+        client = MagicMock()
+        with patch.dict(os.environ, {"SSH_KNOWN_HOSTS": known_hosts, "SSH_STRICT_HOST_KEYS": "1"}, clear=False):
+            configure_ssh_client(client)
+        policy = client.set_missing_host_key_policy.call_args.args[0]
+        self.assertIsInstance(policy, paramiko.RejectPolicy)
+
+    def test_remote_script_uses_pty_and_closes_input(self):
+        client = MagicMock()
+        stdin = MagicMock()
+        stdout = MagicMock()
+        stderr = MagicMock()
+        stdout.read.return_value = b"nginx: configuration file is ok\r\n"
+        stderr.read.return_value = b""
+        stdout.channel.recv_exit_status.return_value = 0
+        client.exec_command.return_value = stdin, stdout, stderr
+
+        message = execute_remote_script(client, "/tmp/cert-deployer-1/deploy.sh")
+
+        client.exec_command.assert_called_once_with(
+            "bash -e -- /tmp/cert-deployer-1/deploy.sh",
+            timeout=120,
+            get_pty=True,
+        )
+        stdin.channel.shutdown_write.assert_called_once_with()
+        self.assertIn("configuration file is ok", message)
 
     def test_log_categories_and_time_filter(self):
         self.login()

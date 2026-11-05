@@ -67,11 +67,13 @@ sudo journalctl -u autocert -f
 sudo ./install.sh
 ```
 
-备份文件不会自动删除，请按服务器容量制定保留策略。服务默认拒绝未知 SSH 主机；可把目标主机密钥加入 `/var/lib/autocert/.ssh/known_hosts`，或在受控内网明确接受风险时创建 `/etc/default/autocert`：
+备份文件不会自动删除，请按服务器容量制定保留策略。systemd 服务使用独立账号和 `/var/lib/autocert/.ssh/known_hosts`，不会读取 root 的 SSH 记录。首次连接未知主机时，应用会接受并持久化主机密钥；后续密钥变化时会拒绝连接。如果生产环境要求首次连接前必须人工核验指纹，可创建 `/etc/default/autocert`：
 
 ```bash
-SSH_ALLOW_UNKNOWN_HOSTS=1
+SSH_STRICT_HOST_KEYS=1
 ```
+
+启用严格模式前，请先把经过核验的目标主机密钥写入 `/var/lib/autocert/.ssh/known_hosts`，并保证文件归 systemd 服务运行用户所有。修改配置后执行 `sudo systemctl restart autocert`。
 
 应用数据保存在 `./data`：
 
@@ -98,24 +100,28 @@ nginx -t
 nginx -s reload
 ```
 
-对于容器场景，建议脚本先复制到宿主机已挂载的共享证书目录，再进入容器校验和重载。例如：
+对于容器场景，脚本会在 SSH 伪终端中执行，因此也支持需要终端检测的 `docker exec -it`。建议先复制到宿主机已挂载的共享证书目录，再进入容器校验和重载。例如：
 
 ```bash
 install -m 0644 {{CERT_PEM}} /etst/share/prod/nginx/cert/current.pem
 install -m 0600 {{CERT_KEY}} /etst/share/prod/nginx/cert/current.key
-docker exec air-apps_app-nginx-app nginx -t
-docker exec air-apps_app-nginx-app nginx -s reload
+docker exec -it air-apps_app-nginx-app nginx -t
+docker exec -it air-apps_app-nginx-app nginx -s reload
 ```
 
-脚本以配置的 SSH 用户权限执行。需要 `sudo` 或 `docker` 权限时，应在目标服务器提前配置免交互的最小权限；脚本不要包含交互式命令。
+脚本以配置的 SSH 用户权限执行。需要 `sudo` 或 `docker` 权限时，应在目标服务器提前配置免交互的最小权限；虽然提供了伪终端，脚本仍不能等待人工输入密码或确认。
 
 ## SSH 主机密钥
 
-应用默认读取运行用户的 `~/.ssh/known_hosts` 并拒绝未知主机。首次连接前，建议由管理员核对指纹并加入 `known_hosts`。仅在受控内网且明确接受风险时，可临时允许未知主机：
+应用读取运行用户的 `~/.ssh/known_hosts`。首次连接未知主机时采用 TOFU（首次使用信任）策略：保存主机密钥，后续连接继续校验；这解决了 systemd 服务账号与 root 用户 SSH 记录相互独立的问题。
+
+TOFU 的首次连接仍可能受到中间人攻击。高安全环境应先由管理员核对指纹并加入 `known_hosts`，然后启用严格模式：
 
 ```bash
-SSH_ALLOW_UNKNOWN_HOSTS=1 ./startup.sh
+SSH_STRICT_HOST_KEYS=1 ./startup.sh
 ```
+
+兼容旧配置：`SSH_ALLOW_UNKNOWN_HOSTS=1` 仍表示允许并记录未知主机；如果同时配置，以 `SSH_STRICT_HOST_KEYS` 为准。
 
 ## 定时任务
 
